@@ -8,6 +8,9 @@
 
 /*static*/ int  Textures::textureChanges = 0;
 /*static*/ bool Textures::MIPMAP = false;
+// InvalidId is initialised in the class body, but it's also odr-used (passed by
+// reference to std::make_pair), so it still needs a definition to link against.
+/*static*/ const TextureId Textures::InvalidId;
 
 Textures::Textures( Options* options_, AppPlatform* platform_ )
 :	clamp(false),
@@ -110,7 +113,9 @@ TextureId Textures::assignTexture( const std::string& resourceName, const Textur
         case TEXF_COMPRESSED_PVRTC_565:
         case TEXF_COMPRESSED_PVRTC_5551:
         {
-#if defined(__APPLE__)
+// PVRTC is a PowerVR (iOS) format; desktop macOS has no such extension, and the
+// macOS texture loader only ever produces TEXF_UNCOMPRESSED_8888 anyway.
+#if defined(__APPLE__) && TARGET_OS_IPHONE
             int fmt = img.transparent? GL_COMPRESSED_RGBA_PVRTC_4BPPV1_IMG : GL_COMPRESSED_RGB_PVRTC_4BPPV1_IMG;
             glCompressedTexImage2D(GL_TEXTURE_2D, 0, fmt, img.w, img.h, 0, img.numBytes, img.data);
 #endif

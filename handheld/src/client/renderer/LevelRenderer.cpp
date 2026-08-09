@@ -64,7 +64,10 @@ LevelRenderer::LevelRenderer( Minecraft* mc)
 	tileRenderer(NULL),
 	destroyProgress(0)
 {
-#ifdef OPENGL_ES
+// These branches are really "buffer objects" vs "display lists", not ES vs
+// desktop, so they key off USE_VBO. On every other target USE_VBO is defined
+// exactly when OPENGL_ES is, so this changes nothing for them.
+#ifdef USE_VBO
 	int maxChunksWidth = 2 * LEVEL_WIDTH / CHUNK_SIZE + 1;
 	numListsOrBuffers = maxChunksWidth * maxChunksWidth * (128/CHUNK_SIZE) * 3;
 	chunkBuffers = new GLuint[numListsOrBuffers];
@@ -88,7 +91,7 @@ LevelRenderer::~LevelRenderer()
 
 	deleteChunks();
 
-#ifdef OPENGL_ES
+#ifdef USE_VBO
 	glDeleteBuffers(numListsOrBuffers, chunkBuffers);
 	glDeleteBuffers(1, &skyBuffer);
 	delete[] chunkBuffers;
@@ -1012,7 +1015,7 @@ void LevelRenderer::renderSky(float alpha) {
     glEnable2(GL_FOG);
     glColor4f2(sr, sg, sb, 1.0f);
 
-#ifdef OPENGL_ES
+#ifdef USE_VBO
 	drawArrayVT(skyBuffer, skyVertexCount);
 #endif
     glEnable2(GL_TEXTURE_2D);
@@ -1233,7 +1236,7 @@ void LevelRenderer::onGraphicsReset()
 	generateSky();
 
 	// Get new buffers
-#ifdef OPENGL_ES
+#ifdef USE_VBO
 	glGenBuffers2(numListsOrBuffers, chunkBuffers);
 #else
 	chunkLists = glGenLists(numListsOrBuffers);

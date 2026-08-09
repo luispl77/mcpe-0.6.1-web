@@ -37,4 +37,8 @@
     #include "main_rpi.h"
 #endif
 
+#ifdef MC_MACOS
+    #include "main_macos.h"
+#endif
+
 

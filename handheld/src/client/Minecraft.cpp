@@ -1,5 +1,9 @@
 #include "Minecraft.h"
 
+#if defined(__APPLE__)
+    #include <TargetConditionals.h>
+#endif
+
 #if defined(APPLE_DEMO_PROMOTION)
     #define NO_NETWORK
 #endif
@@ -1245,7 +1249,7 @@ void Minecraft::_reloadInput() {
 	if (useTouchscreen()) {
 		inputHolder = new TouchInputHolder(this, &options);
 	} else {
-		#if defined(ANDROID) || defined(__APPLE__) 
+		#if defined(ANDROID) || (defined(__APPLE__) && TARGET_OS_IPHONE)
 			inputHolder = new CustomInputHolder(
 				new XperiaPlayInput(&options),
 				new ControllerTurnInput(2, ControllerTurnInput::MODE_DELTA),

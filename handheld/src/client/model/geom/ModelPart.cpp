@@ -181,7 +181,8 @@ void ModelPart::translateTo( float scale )
 
 void ModelPart::compile( float scale )
 {
-#ifndef OPENGL_ES
+// Display lists vs buffer objects; see the note in LevelRenderer.cpp.
+#ifndef USE_VBO
 	list = glGenLists(1);
 	// FIX NORMAL BUG HERE
 	glNewList(list, GL_COMPILE);
@@ -194,7 +195,7 @@ void ModelPart::compile( float scale )
 			cubes[i]->compile(t, scale);
 	}
 	t.end(true, vboId);
-#ifndef OPENGL_ES
+#ifndef USE_VBO
 	glEndList();
 #endif
 	compiled = true;
@@ -202,7 +203,7 @@ void ModelPart::compile( float scale )
 
 void ModelPart::draw()
 {
-#ifdef OPENGL_ES
+#ifdef USE_VBO
 	drawArrayVT_NoState(vboId, cubes.size() * 2 * 3 * 6, 24);
 #else
 	glCallList(list);

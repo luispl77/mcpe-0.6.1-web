@@ -4,8 +4,13 @@
 #include "../../platform/log.h"
 #include "../Options.h"
 
-// Android should always run OPENGL_ES
-#if defined(ANDROID) || defined(__APPLE__) || defined(RPI)
+#if defined(__APPLE__)
+    #include <TargetConditionals.h>
+#endif
+
+// Android should always run OPENGL_ES. On Apple only iOS does; macOS uses the
+// desktop (fixed-function compatibility profile) path below.
+#if defined(ANDROID) || defined(RPI) || (defined(__APPLE__) && TARGET_OS_IPHONE)
     #define OPENGL_ES
 #endif
 
@@ -14,8 +19,8 @@
 	#define USE_VBO
 	#define GL_QUADS 0x0007
     #if defined(__APPLE__)
-        #import <OpenGLES/ES1/gl.height>
-        #import <OpenGLES/ES1/glext.height>
+        #import <OpenGLES/ES1/gl.h>
+        #import <OpenGLES/ES1/glext.h>
     #else
         #include <GLES/gl.h>
         #if defined(ANDROID)
@@ -28,11 +33,27 @@
 	   #include <WinSock2.h>
 	   #include <Windows.h>
 	#endif
-	#include <gl/glew.h>
-	#include <gl/GL.h>
+	#if defined(__APPLE__)
+	   // OpenGL.framework exposes the whole 2.1 compatibility profile directly,
+	   // so no extension loader (glew) is needed here.
+	   #define GL_SILENCE_DEPRECATION
+	   #include <OpenGL/gl.h>
+	   #include <OpenGL/glext.h>
+	   // Buffer objects are core in 2.1, and parts of the renderer (Gui.cpp)
+	   // call drawArrayVT unconditionally, so the non-VBO path isn't actually
+	   // complete. Take the same path Android and iOS shipped.
+	   #define USE_VBO
+	#else
+	   #include <gl/glew.h>
+	   #include <gl/GL.h>
+	#endif
 
 	#define glFogx(a,b)	glFogi(a,b)
 	#define glOrthof(a,b,c,d,e,f) glOrtho(a,b,c,d,e,f)
+	// ES spells these with float args; desktop GL only has the double forms.
+	#define glDepthRangef(n,f) glDepthRange(n,f)
+	#define glClearDepthf(d) glClearDepth(d)
+	#define glFrustumf(a,b,c,d,e,f) glFrustum(a,b,c,d,e,f)
 #endif
 
 
