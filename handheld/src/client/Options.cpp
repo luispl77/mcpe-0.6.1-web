@@ -99,7 +99,9 @@ void Options::initDefaultValues() {
 	fancyGraphics = false;
 
 	//renderDebug = true;
-	#if !defined(RPI)
+	// Android hardware keycodes (19-23 are DPAD_UP/DOWN/LEFT/RIGHT/CENTER) for
+	// the Xperia Play pad. Desktop macOS keeps the WASD bindings set above.
+	#if !defined(RPI) && !defined(MC_MACOS)
 		keyUp.key		= 19;
 		keyDown.key		= 20;
 		keyLeft.key		= 21;
