@@ -10,7 +10,9 @@
 #include <io.h>
 
 
-#elif !defined ( __APPLE__ ) && !defined ( __APPLE_CC__ ) && !defined ( __PPC__ ) && !defined ( __FreeBSD__ ) && !defined ( __S3E__ )
+// sys/io.h is the x86 port-IO header and nothing here uses it; Emscripten has
+// no such header, so it joins the list of platforms that skip it.
+#elif !defined ( __APPLE__ ) && !defined ( __APPLE_CC__ ) && !defined ( __PPC__ ) && !defined ( __FreeBSD__ ) && !defined ( __S3E__ ) && !defined ( __EMSCRIPTEN__ )
 #include <sys/io.h>
 #endif
 

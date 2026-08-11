@@ -1,0 +1,62 @@
+name: Build web and deploy to Pages
+
+# Manual only by default. Deploying publishes the game to a public URL --
+# GitHub Pages sites are world readable even when the repository is private --
+# so this should not fire off an ordinary push without you meaning it.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Let a run finish rather than cancelling it midway through a deploy.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 4.0.0
+          actions-cache-folder: emsdk-cache
+
+      - name: Configure
+        working-directory: handheld/project/web
+        run: emcmake cmake -S . -B build
+
+      - name: Build
+        working-directory: handheld/project/web
+        run: cmake --build build -j"$(nproc)"
+
+      # Pages serves index.html; everything else is fetched relative to it, so
+      # only these four files need to ship. The CMake scratch in build/ does not.
+      - name: Assemble the site
+        run: |
+          mkdir -p site
+          cp handheld/project/web/build/minecraftpe.html site/index.html
+          cp handheld/project/web/build/minecraftpe.js   site/
+          cp handheld/project/web/build/minecraftpe.wasm site/
+          cp handheld/project/web/build/minecraftpe.data site/
+          ls -lh site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

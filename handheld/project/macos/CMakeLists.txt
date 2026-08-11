@@ -38,6 +38,12 @@ list(FILTER GAME_SOURCES EXCLUDE REGEX "/main_android.*\\.cpp$")
 list(FILTER GAME_SOURCES EXCLUDE REGEX "/main_dedicated\\.cpp$")
 list(FILTER GAME_SOURCES EXCLUDE REGEX "/main_rpi\\.cpp$")
 list(FILTER GAME_SOURCES EXCLUDE REGEX "/AppPlatform_win32\\.cpp$")
+# The SDL platform layer is shared with the web target, but two pieces of it
+# are not: macOS uses the Cocoa dialog and the Foundation moveFolder(), both
+# added as ObjC++ below, so the web build's plain-C++ versions must stay out or
+# they collide at link time.
+list(FILTER GAME_SOURCES EXCLUDE REGEX "/AppPlatform_sdl_dialog_web\\.cpp$")
+list(FILTER GAME_SOURCES EXCLUDE REGEX "/MoveFolder_posix\\.cpp$")
 # OpenSL ES is Android's audio backend; macOS uses the OpenAL one.
 list(FILTER GAME_SOURCES EXCLUDE REGEX "/SoundSystemSL\\.cpp$")
 # The vendored RakNet copy under src/ is built separately above.
@@ -48,7 +54,7 @@ list(FILTER GAME_SOURCES EXCLUDE REGEX "/src/raknet/")
 # language for the project.
 set(OBJCXX_SOURCES
     "${SRC_DIR}/world/level/storage/MoveFolder.mm"
-    "${SRC_DIR}/AppPlatform_macos_dialog.mm")
+    "${SRC_DIR}/AppPlatform_sdl_dialog_cocoa.mm")
 set_source_files_properties(${OBJCXX_SOURCES} PROPERTIES
     LANGUAGE CXX
     COMPILE_OPTIONS "-x;objective-c++")

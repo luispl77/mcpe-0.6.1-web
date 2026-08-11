@@ -47,9 +47,21 @@ void glInit()
 }
 
 void anGenBuffers(GLsizei n, GLuint* buffers) {
+#if defined(__EMSCRIPTEN__)
+	// WebGL buffer names are opaque WebGLBuffer objects, and Emscripten resolves
+	// the integer IDs the C API uses through a table that only glGenBuffers
+	// fills in. Handing out invented IDs the way the branch below does leaves
+	// every later bind pointing at nothing ("bufferData: no buffer"), so the
+	// real entry point has to be used here.
+	//
+	// Desktop GL and GLES 1.1 are laxer -- glBindBuffer on an unused name just
+	// creates the object -- which is why inventing IDs works everywhere else.
+	glGenBuffers(n, buffers);
+#else
 	static GLuint k = 1;
 	for (int i = 0; i < n; ++i)
 		buffers[i] = ++k;
+#endif
 }
 
 #ifdef USE_VBO

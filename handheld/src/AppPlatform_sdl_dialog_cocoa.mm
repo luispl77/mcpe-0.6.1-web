@@ -1,4 +1,4 @@
-#include "AppPlatform_macos.h"
+#include "AppPlatform_sdl.h"
 #include "client/gui/screens/DialogDefinitions.h"
 
 #import <Cocoa/Cocoa.h>
@@ -48,7 +48,7 @@ static NSView* buildCreateWorldAccessory(NSTextField** outName,
 	return view;
 }
 
-void AppPlatform_macos::showDialog(int dialogId)
+void AppPlatform_sdl::showDialog(int dialogId)
 {
 	_userInput.clear();
 	_userInputStatus = USERINPUT_NOTINITED;
@@ -111,7 +111,7 @@ void AppPlatform_macos::showDialog(int dialogId)
 	}
 }
 
-int AppPlatform_macos::getUserInputStatus()
+int AppPlatform_sdl::getUserInputStatus()
 {
 	// Consume-once: the screens poll this every tick and only reset their own
 	// state when it reads back as something other than "not inited".
@@ -120,7 +120,7 @@ int AppPlatform_macos::getUserInputStatus()
 	return status;
 }
 
-StringVector AppPlatform_macos::getUserInput()
+StringVector AppPlatform_sdl::getUserInput()
 {
 	return _userInput;
 }

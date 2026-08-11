@@ -1,24 +1,29 @@
-#ifndef APPPLATFORM_MACOS_H__
-#define APPPLATFORM_MACOS_H__
+#ifndef APPPLATFORM_SDL_H__
+#define APPPLATFORM_SDL_H__
 
 #include "AppPlatform.h"
 #include "platform/log.h"
 #include "client/renderer/gles.h"
 #include <string>
 
-/** Desktop macOS platform layer.
+/** Platform layer shared by the SDL2 targets: desktop macOS and Emscripten.
 
     Modelled on AppPlatform_win32, but with the asset root supplied at runtime
     instead of being hard coded to "../../data/", and with the png loader
-    normalising whatever colour type the file happens to use into RGBA8888. */
-class AppPlatform_macos: public AppPlatform
+    normalising whatever colour type the file happens to use into RGBA8888.
+
+    Everything here is portable C++ (libpng, stdio). The one part that isn't is
+    the text-input dialog, which each target supplies in its own file --
+    AppPlatform_sdl_dialog_cocoa.mm on macOS, AppPlatform_sdl_dialog_web.cpp on
+    the web -- so exactly one of those is compiled into any given build. */
+class AppPlatform_sdl: public AppPlatform
 {
 public:
 	static const int USERINPUT_CANCEL    =  0;
 	static const int USERINPUT_OK        =  1;
 	static const int USERINPUT_NOTINITED = -2;
 
-	AppPlatform_macos(const std::string& dataDir, int width, int height)
+	AppPlatform_sdl(const std::string& dataDir, int width, int height)
 	:	_dataDir(dataDir),
 		_width(width),
 		_height(height),
@@ -27,9 +32,10 @@ public:
 
 	/** The game asks the platform to collect text (world name, chat line, ...)
 	    through showDialog() + getUserInputStatus() + getUserInput(). On Android
-	    and iOS that's a native dialog; here it's a Cocoa NSAlert, run modally,
-	    so the answer is already latched by the time the screen next ticks.
-	    Implemented in AppPlatform_macos_dialog.mm. */
+	    and iOS that's a native dialog; on macOS it's a Cocoa NSAlert and on the
+	    web a set of JS prompts. Both are run modally, so the answer is already
+	    latched by the time the screen next ticks and getUserInputStatus() can
+	    stay a simple consume-once poll. See the per-target dialog files. */
 	void showDialog(int dialogId);
 	int getUserInputStatus();
 	StringVector getUserInput();
@@ -70,4 +76,4 @@ private:
 	StringVector _userInput;
 };
 
-#endif /*APPPLATFORM_MACOS_H__*/
+#endif /*APPPLATFORM_SDL_H__*/

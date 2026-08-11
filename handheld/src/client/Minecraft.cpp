@@ -292,7 +292,10 @@ void Minecraft::setLevel(Level* level, const std::string& message /* ="" */, Loc
 		}
 		this->level = level;
 		_hasSignaledGeneratingLevelFinished = false;
-#ifdef STANDALONE_SERVER
+		// Threads in wasm mean pthreads, which mean SharedArrayBuffer, which
+		// means COOP/COEP response headers -- and GitHub Pages cannot send
+		// those. Generating on the main thread just blocks for a second or two.
+#if defined(STANDALONE_SERVER) || defined(__EMSCRIPTEN__)
 		const bool threadedLevelCreation = false;
 #else
 		const bool threadedLevelCreation = true;

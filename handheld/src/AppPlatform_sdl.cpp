@@ -1,4 +1,4 @@
-#include "AppPlatform_macos.h"
+#include "AppPlatform_sdl.h"
 #include "util/Mth.h"
 
 #include <cstdio>
@@ -14,7 +14,7 @@ static void png_funcReadFile(png_structp pngPtr, png_bytep data, png_size_t leng
 	((std::istream*)png_get_io_ptr(pngPtr))->read((char*)data, length);
 }
 
-BinaryBlob AppPlatform_macos::readAssetFile(const std::string& filename)
+BinaryBlob AppPlatform_sdl::readAssetFile(const std::string& filename)
 {
 	const std::string path = _dataDir + "/" + filename;
 
@@ -36,7 +36,7 @@ BinaryBlob AppPlatform_macos::readAssetFile(const std::string& filename)
 	return blob;
 }
 
-TextureData AppPlatform_macos::loadTexture(const std::string& filename_, bool textureFolder)
+TextureData AppPlatform_sdl::loadTexture(const std::string& filename_, bool textureFolder)
 {
 	TextureData out;
 
@@ -109,7 +109,7 @@ TextureData AppPlatform_macos::loadTexture(const std::string& filename_, bool te
 	return out;
 }
 
-void AppPlatform_macos::saveScreenshot(const std::string& filename, int glWidth, int glHeight)
+void AppPlatform_sdl::saveScreenshot(const std::string& filename, int glWidth, int glHeight)
 {
 	if (glWidth <= 0 || glHeight <= 0)
 		return;
@@ -159,21 +159,25 @@ void AppPlatform_macos::saveScreenshot(const std::string& filename, int glWidth,
 	LOGI("Saved screenshot: %s\n", filename.c_str());
 }
 
-std::string AppPlatform_macos::getDateString(int s)
+std::string AppPlatform_sdl::getDateString(int s)
 {
 	std::stringstream ss;
 	ss << s << " s (UTC)";
 	return ss.str();
 }
 
-std::string AppPlatform_macos::getPlatformStringVar(int stringId)
+std::string AppPlatform_sdl::getPlatformStringVar(int stringId)
 {
 	if (stringId == PlatformStringVars::DEVICE_BUILD_MODEL)
+#if defined(__EMSCRIPTEN__)
+		return "Browser";
+#else
 		return "Macintosh";
+#endif
 	return "";
 }
 
-float AppPlatform_macos::getPixelsPerMillimeter()
+float AppPlatform_sdl::getPixelsPerMillimeter()
 {
 	// Roughly a 27" desktop display; only used to size touch targets, which
 	// this build doesn't show anyway.

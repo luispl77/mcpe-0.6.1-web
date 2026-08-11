@@ -3,9 +3,11 @@
 
 //package net.minecraft.client.sound;
 
+// Emscripten joins the OpenAL branch: it implements OpenAL over WebAudio, and
+// the bare SoundSystem in the #else is a silent do-nothing stub.
 #if defined(ANDROID) && !defined(PRE_ANDROID23)
 	#include "../../platform/audio/SoundSystemSL.h"
-#elif defined(__APPLE__)
+#elif defined(__APPLE__) || defined(__EMSCRIPTEN__)
     #include "../../platform/audio/SoundSystemAL.h"
 #else
 	#include "../../platform/audio/SoundSystem.h"
@@ -23,7 +25,7 @@ class SoundEngine
 
 	#if defined(ANDROID) && !defined(PRE_ANDROID23) && !defined(RPI)
 		SoundSystemSL soundSystem;
-    #elif defined(__APPLE__)
+    #elif defined(__APPLE__) || defined(__EMSCRIPTEN__)
         SoundSystemAL soundSystem;
 	#else
 	    SoundSystem soundSystem;

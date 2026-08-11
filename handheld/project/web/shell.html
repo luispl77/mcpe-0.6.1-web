@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Minecraft Pocket Edition 0.6.1</title>
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: #1a1a1a;
+    color: #ddd;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    overflow: hidden;
+  }
+  #wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 10px;
+  }
+  /* No border or focus ring: the canvas is grabbed for pointer lock and an
+     outline flashing on every click is distracting. */
+  canvas {
+    display: block;
+    background: #000;
+    outline: none;
+    max-width: 100%;
+    max-height: 72vh;
+    /* Keep the blocky textures blocky when the canvas is scaled up. */
+    image-rendering: pixelated;
+  }
+  #status { font-size: 13px; min-height: 1.2em; }
+  #hint { font-size: 12px; color: #888; text-align: center; line-height: 1.6; }
+  #hint kbd { background: #333; border-radius: 3px; padding: 1px 5px; color: #ccc; }
+  #saves { display: flex; gap: 8px; align-items: center; }
+  #saves button {
+    font: inherit;
+    font-size: 12px;
+    color: #ddd;
+    background: #333;
+    border: 1px solid #4a4a4a;
+    border-radius: 4px;
+    padding: 5px 12px;
+    cursor: pointer;
+  }
+  #saves button:hover:not(:disabled) { background: #3d3d3d; }
+  #saves button:disabled { opacity: 0.4; cursor: default; }
+  #saveMsg { font-size: 12px; color: #7a9; min-height: 1.2em; }
+</style>
+</head>
+<body>
+  <div id="wrap">
+    <div id="status">Loading…</div>
+    <canvas id="canvas" width="854" height="480" tabindex="-1"
+            oncontextmenu="event.preventDefault()"></canvas>
+
+    <div id="hint">
+      <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp;·&nbsp;
+      <kbd>Space</kbd> jump &nbsp;·&nbsp; mouse to look &nbsp;·&nbsp;
+      <kbd>Esc</kbd> release cursor
+    </div>
+
+    <div id="saves">
+      <button id="exportBtn" disabled>Download worlds</button>
+      <button id="importBtn" disabled>Restore worlds…</button>
+      <input id="importFile" type="file" accept=".zip,application/zip" hidden>
+    </div>
+    <div id="saveMsg">Worlds live in this browser's storage — download them to keep a copy.</div>
+  </div>
+
+  <script>
+    var statusEl = document.getElementById('status');
+    var canvas = document.getElementById('canvas');
+
+    var Module = {
+      canvas: canvas,
+      // The game's own printf output; keep it in the console rather than on the
+      // page, but surface hard failures in the status line.
+      print: function (text) { console.log(text); },
+      printErr: function (text) { console.error(text); },
+      setStatus: function (text) { statusEl.textContent = text || ''; },
+      onRuntimeInitialized: function () {
+        statusEl.textContent = '';
+        document.getElementById('exportBtn').disabled = false;
+        document.getElementById('importBtn').disabled = false;
+      }
+    };
+
+    // Emscripten's SDL2 port requests pointer lock itself when the game calls
+    // SDL_SetRelativeMouseMode. Browsers only grant that from a user gesture,
+    // so make sure the canvas has focus for the keyboard to reach SDL too.
+    canvas.addEventListener('click', function () { canvas.focus(); });
+
+    window.onerror = function (message) { statusEl.textContent = 'Error: ' + message; };
+  </script>
+
+  <script>
+  // ---------------------------------------------------------------------------
+  // Save export / import.
+  //
+  // Worlds live in IndexedDB, which the browser is free to evict and which any
+  // "clear browsing data" wipes. These two buttons move the save tree in and out
+  // as an ordinary .zip so a world can be kept, backed up or moved to another
+  // machine. Written by hand rather than pulled from a library so the page stays
+  // a single self-contained file with no external requests.
+  // ---------------------------------------------------------------------------
+  (function () {
+    var SAVES = '/saves';
+    var msgEl = document.getElementById('saveMsg');
+
+    function say(text, isError) {
+      msgEl.textContent = text;
+      msgEl.style.color = isError ? '#d77' : '#7a9';
+    }
+
+    // --- zip primitives ------------------------------------------------------
+
+    var crcTable = (function () {
+      var t = new Uint32Array(256);
+      for (var i = 0; i < 256; i++) {
+        var c = i;
+        for (var k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+        t[i] = c >>> 0;
+      }
+      return t;
+    })();
+
+    function crc32(bytes) {
+      var c = 0xFFFFFFFF;
+      for (var i = 0; i < bytes.length; i++)
+        c = crcTable[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+      return (c ^ 0xFFFFFFFF) >>> 0;
+    }
+
+    // deflate-raw is exactly zip's method 8. Where it isn't available the entry
+    // is stored uncompressed instead, which every unzipper still understands.
+    async function deflateRaw(bytes) {
+      if (typeof CompressionStream === 'undefined') return null;
+      try {
+        var cs = new CompressionStream('deflate-raw');
+        var stream = new Blob([bytes]).stream().pipeThrough(cs);
+        return new Uint8Array(await new Response(stream).arrayBuffer());
+      } catch (e) { return null; }
+    }
+
+    async function inflateRaw(bytes) {
+      var ds = new DecompressionStream('deflate-raw');
+      var stream = new Blob([bytes]).stream().pipeThrough(ds);
+      return new Uint8Array(await new Response(stream).arrayBuffer());
+    }
+
+    function dosDateTime(d) {
+      return {
+        time: (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1),
+        date: ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate()
+      };
+    }
+
+    // --- walking the emscripten filesystem -----------------------------------
+
+    function listFiles(dir, prefix, out) {
+      var entries;
+      try { entries = Module.FS.readdir(dir); }
+      catch (e) { return out; }
+
+      entries.forEach(function (name) {
+        if (name === '.' || name === '..') return;
+        var full = dir + '/' + name;
+        var rel = prefix ? prefix + '/' + name : name;
+        var stat = Module.FS.stat(full);
+        if (Module.FS.isDir(stat.mode)) listFiles(full, rel, out);
+        else out.push({ path: rel, data: Module.FS.readFile(full) });
+      });
+      return out;
+    }
+
+    function mkdirTree(path) {
+      var parts = path.split('/').filter(Boolean);
+      var built = '';
+      parts.forEach(function (p) {
+        built += '/' + p;
+        try { Module.FS.mkdir(built); } catch (e) { /* already there */ }
+      });
+    }
+
+    // --- export --------------------------------------------------------------
+
+    async function exportSaves() {
+      var files = listFiles(SAVES, '', []);
+      if (!files.length) { say('No worlds to download yet.', true); return; }
+
+      say('Packing ' + files.length + ' files…');
+
+      var stamp = dosDateTime(new Date());
+      var chunks = [], central = [], offset = 0;
+
+      for (var i = 0; i < files.length; i++) {
+        var f = files[i];
+        var nameBytes = new TextEncoder().encode(f.path);
+        var raw = f.data;
+        var crc = crc32(raw);
+
+        var packed = await deflateRaw(raw);
+        var method = 8;
+        if (!packed || packed.length >= raw.length) { packed = raw; method = 0; }
+
+        var local = new Uint8Array(30 + nameBytes.length);
+        var lv = new DataView(local.buffer);
+        lv.setUint32(0, 0x04034b50, true);
+        lv.setUint16(4, 20, true);
+        lv.setUint16(6, 0, true);
+        lv.setUint16(8, method, true);
+        lv.setUint16(10, stamp.time, true);
+        lv.setUint16(12, stamp.date, true);
+        lv.setUint32(14, crc, true);
+        lv.setUint32(18, packed.length, true);
+        lv.setUint32(22, raw.length, true);
+        lv.setUint16(26, nameBytes.length, true);
+        lv.setUint16(28, 0, true);
+        local.set(nameBytes, 30);
+
+        var cd = new Uint8Array(46 + nameBytes.length);
+        var cv = new DataView(cd.buffer);
+        cv.setUint32(0, 0x02014b50, true);
+        cv.setUint16(4, 20, true);
+        cv.setUint16(6, 20, true);
+        cv.setUint16(8, 0, true);
+        cv.setUint16(10, method, true);
+        cv.setUint16(12, stamp.time, true);
+        cv.setUint16(14, stamp.date, true);
+        cv.setUint32(16, crc, true);
+        cv.setUint32(20, packed.length, true);
+        cv.setUint32(24, raw.length, true);
+        cv.setUint16(28, nameBytes.length, true);
+        cv.setUint32(42, offset, true);
+        cd.set(nameBytes, 46);
+
+        chunks.push(local, packed);
+        central.push(cd);
+        offset += local.length + packed.length;
+      }
+
+      var centralSize = central.reduce(function (n, c) { return n + c.length; }, 0);
+      var eocd = new Uint8Array(22);
+      var ev = new DataView(eocd.buffer);
+      ev.setUint32(0, 0x06054b50, true);
+      ev.setUint16(8, central.length, true);
+      ev.setUint16(10, central.length, true);
+      ev.setUint32(12, centralSize, true);
+      ev.setUint32(16, offset, true);
+
+      var blob = new Blob(chunks.concat(central, [eocd]), { type: 'application/zip' });
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a');
+      a.href = url;
+      a.download = 'mcpe-worlds-' + new Date().toISOString().slice(0, 10) + '.zip';
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+
+      say('Downloaded ' + files.length + ' files (' + (blob.size / 1048576).toFixed(1) + ' MB).');
+    }
+
+    // --- import --------------------------------------------------------------
+
+    async function importSaves(file) {
+      var buf = new Uint8Array(await file.arrayBuffer());
+      var dv = new DataView(buf.buffer);
+
+      // Find the end-of-central-directory record by scanning backwards.
+      var eocd = -1;
+      for (var i = buf.length - 22; i >= 0 && i > buf.length - 65558; i--) {
+        if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+      }
+      if (eocd < 0) throw new Error('not a zip file');
+
+      var count = dv.getUint16(eocd + 10, true);
+      var pos = dv.getUint32(eocd + 16, true);
+      var written = 0;
+
+      for (var n = 0; n < count; n++) {
+        if (dv.getUint32(pos, true) !== 0x02014b50) throw new Error('bad central directory');
+
+        var method     = dv.getUint16(pos + 10, true);
+        var compSize   = dv.getUint32(pos + 20, true);
+        var nameLen    = dv.getUint16(pos + 28, true);
+        var extraLen   = dv.getUint16(pos + 30, true);
+        var commentLen = dv.getUint16(pos + 32, true);
+        var localAt    = dv.getUint32(pos + 42, true);
+        var name = new TextDecoder().decode(buf.subarray(pos + 46, pos + 46 + nameLen));
+        pos += 46 + nameLen + extraLen + commentLen;
+
+        if (name.endsWith('/')) continue;
+        // Refuse anything that would escape the save directory.
+        if (name.startsWith('/') || name.split('/').indexOf('..') !== -1) continue;
+
+        // The local header's name/extra lengths are authoritative for finding
+        // where the data actually starts, and may differ from the central copy.
+        var localNameLen  = dv.getUint16(localAt + 26, true);
+        var localExtraLen = dv.getUint16(localAt + 28, true);
+        var start = localAt + 30 + localNameLen + localExtraLen;
+        var data = buf.subarray(start, start + compSize);
+
+        if (method === 8) data = await inflateRaw(data);
+        else if (method !== 0) throw new Error('unsupported compression in ' + name);
+
+        var full = SAVES + '/' + name;
+        mkdirTree(full.slice(0, full.lastIndexOf('/')));
+        Module.FS.writeFile(full, data);
+        written++;
+      }
+
+      // Push straight through to IndexedDB, then reload so the game re-reads the
+      // world list from a clean start rather than from whatever it had cached.
+      await new Promise(function (resolve, reject) {
+        Module.FS.syncfs(false, function (err) { err ? reject(err) : resolve(); });
+      });
+
+      say('Restored ' + written + ' files. Reloading…');
+      setTimeout(function () { location.reload(); }, 1200);
+    }
+
+    // --- wiring --------------------------------------------------------------
+
+    var importFile = document.getElementById('importFile');
+
+    document.getElementById('exportBtn').addEventListener('click', function () {
+      exportSaves().catch(function (e) { say('Download failed: ' + e.message, true); });
+    });
+
+    document.getElementById('importBtn').addEventListener('click', function () {
+      importFile.click();
+    });
+
+    importFile.addEventListener('change', function () {
+      var file = importFile.files[0];
+      if (!file) return;
+      say('Restoring from ' + file.name + '…');
+      importSaves(file).catch(function (e) { say('Restore failed: ' + e.message, true); });
+      importFile.value = '';
+    });
+  })();
+  </script>
+
+  {{{ SCRIPT }}}
+</body>
+</html>

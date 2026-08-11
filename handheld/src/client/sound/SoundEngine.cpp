@@ -148,7 +148,7 @@ void SoundEngine::init( Minecraft* mc, Options* options )
 
 void SoundEngine::enable( bool status )
 {
-#if defined(__APPLE__)
+#if defined(__APPLE__) || defined(__EMSCRIPTEN__)
 	soundSystem.enable(status);
 #endif
 }
@@ -201,7 +201,11 @@ void SoundEngine::playUI(const std::string& name, float volume, float pitch) {
 	//volume *= 2.0f;
 	mc->platform()->playSound(name, volume, pitch);
 }
-#elif defined(__APPLE__)
+// The OpenAL backend keeps the listener parked at the origin (see the note in
+// update() about setListenerPos being unused) and expects sound positions
+// already translated into player space, so this path must not use the absolute
+// world coordinates the generic #else branch passes down.
+#elif defined(__APPLE__) || defined(__EMSCRIPTEN__)
 void SoundEngine::play(const std::string& name, float x, float y, float z, float volume, float pitch) {
 	if ((volume *= options->sound) <= 0) return;
 

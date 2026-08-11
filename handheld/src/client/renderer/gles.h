@@ -10,7 +10,12 @@
 
 // Android should always run OPENGL_ES. On Apple only iOS does; macOS uses the
 // desktop (fixed-function compatibility profile) path below.
-#if defined(ANDROID) || defined(RPI) || (defined(__APPLE__) && TARGET_OS_IPHONE)
+//
+// Emscripten takes the ES path too: WebGL has no fixed-function pipeline at all,
+// so the renderer runs on top of -sLEGACY_GL_EMULATION, which emulates GLES 1.1
+// over WebGL. Its headers are a real GLES 1.1 set, so glOrthof/glFogx/glDepthRangef
+// are already declared and none of the desktop shims below are wanted.
+#if defined(ANDROID) || defined(RPI) || defined(__EMSCRIPTEN__) || (defined(__APPLE__) && TARGET_OS_IPHONE)
     #define OPENGL_ES
 #endif
 
@@ -23,7 +28,7 @@
         #import <OpenGLES/ES1/glext.h>
     #else
         #include <GLES/gl.h>
-        #if defined(ANDROID)
+        #if defined(ANDROID) || defined(__EMSCRIPTEN__)
             #include<GLES/glext.h>
         #endif
     #endif
