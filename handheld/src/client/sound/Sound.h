@@ -61,7 +61,9 @@ private:
 	mutable char* buffer;
 };
 
-#if !defined(PRE_ANDROID23) && !defined(__APPLE__) && !defined(RPI)
+// iOS loaded AAC through SoundEngine.mm instead of this built-in PCM bank, so
+// the bank was compiled out for all of __APPLE__. Desktop macOS uses the bank.
+#if !defined(PRE_ANDROID23) && !defined(RPI) && (!defined(__APPLE__) || defined(MC_MACOS))
 
 extern SoundDesc SA_cloth1;
 extern SoundDesc SA_cloth2;

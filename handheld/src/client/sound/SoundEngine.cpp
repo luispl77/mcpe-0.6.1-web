@@ -30,7 +30,7 @@ void SoundEngine::init( Minecraft* mc, Options* options )
 		loadLibrary();
 	}
 
-#if !defined(PRE_ANDROID23) && !defined(__APPLE__) && !defined(RPI)
+#if !defined(PRE_ANDROID23) && !defined(RPI) && (!defined(__APPLE__) || defined(MC_MACOS))
 	sounds.add("step.cloth", SA_cloth1);
 	sounds.add("step.cloth", SA_cloth2);
 	sounds.add("step.cloth", SA_cloth3);
