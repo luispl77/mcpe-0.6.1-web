@@ -3,6 +3,7 @@
 
 #include "../Screen.h"
 #include "../components/Button.h"
+#include "ScreenChooser.h"
 
 class ImageButton;
 class OptionsPane;
@@ -15,7 +16,10 @@ class OptionsScreen: public Screen
 	void generateOptionScreens();
 
 public:
-	OptionsScreen();
+	/** `returnTo` is where the close button goes. Reaching the options from
+	    the pause menu and being dropped back at the title screen would mean
+	    leaving the world, so the caller says where it came from. */
+	OptionsScreen(ScreenId returnTo = SCREEN_STARTMENU);
 	~OptionsScreen();
 	void setupPositions();
 	void buttonClicked( Button* button );
@@ -33,6 +37,7 @@ private:
 	std::vector<OptionsPane*> optionPanes;
 	OptionsPane* currentOptionPane;
 	int selectedCategory;
+	ScreenId returnTo;
 };
 
 #endif /*NET_MINECRAFT_CLIENT_GUI_SCREENS__OptionsScreen_H__*/

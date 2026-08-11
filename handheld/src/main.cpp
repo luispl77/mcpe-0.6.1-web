@@ -37,7 +37,7 @@
     #include "main_rpi.h"
 #endif
 
-#if defined(MC_MACOS) || defined(MC_WASM)
+#if defined(MC_WASM)
     #include "main_sdl.h"
 #endif
 

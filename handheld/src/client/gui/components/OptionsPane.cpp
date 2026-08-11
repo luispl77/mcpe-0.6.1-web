@@ -15,10 +15,12 @@ void OptionsPane::setupPositions() {
 		(*it)->width = width;
 		(*it)->y = currentHeight;
 		(*it)->x = x;
-		currentHeight += (*it)->height + 1;
+		// Lay the group out before reading its height, or the stacking uses
+		// whatever it measured back when it was built at y = 0.
+		(*it)->setupPositions();
+		currentHeight += (*it)->height + 6;
 	}
-	height = currentHeight;
-	super::setupPositions();
+	height = currentHeight - y;
 }
 
 OptionsGroup& OptionsPane::createOptionsGroup( std::string label ) {

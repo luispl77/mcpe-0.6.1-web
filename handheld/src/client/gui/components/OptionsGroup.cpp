@@ -13,13 +13,16 @@ void OptionsGroup::setupPositions() {
 	int curY = y + 10;
 	for(std::vector<GuiElement*>::iterator it = children.begin(); it != children.end(); ++it) {
 		(*it)->width = width - 5;
-		
+
 		(*it)->y = curY;
 		(*it)->x = x + 10;
 		(*it)->setupPositions();
 		curY += (*it)->height + 3;
 	}
-	height = curY;
+	// A height, not a bottom edge -- OptionsPane stacks groups by adding this
+	// to a running y, so leaving it absolute pushed every group after the
+	// first off the bottom of the pane.
+	height = curY - y;
 }
 
 void OptionsGroup::render( Minecraft* minecraft, int xm, int ym ) {
@@ -45,6 +48,9 @@ void OptionsGroup::createToggle( const Options::Option* option, Minecraft* minec
 	def.height = 20 * 0.7f;
 	OptionButton* element = new OptionButton(option);
 	element->setImageDef(def, true);
+	// Without this the button picks its on/off frame from an uninitialised
+	// flag, so it can open showing the opposite of the actual setting.
+	element->updateImage(&minecraft->options);
 	std::string itemLabel = I18n::get(option->getCaptionId());
 	OptionsItem* item = new OptionsItem(itemLabel, element);
 	addChild(item);
@@ -58,11 +64,22 @@ void OptionsGroup::createProgressSlider( const Options::Option* option, Minecraf
 									minecraft->options.getProgrssMax(option));
 	element->width = 100;
 	element->height = 20;
-	OptionsItem* item = new OptionsItem(label, element);
+	// The row is named after the option, not after the group it sits in --
+	// using `label` here is what made the sensitivity row read
+	// "options.group.mojang<" instead of "Sensitivity".
+	OptionsItem* item = new OptionsItem(I18n::get(option->getCaptionId()), element);
 	addChild(item);
 	setupPositions();
 }
 
 void OptionsGroup::createStepSlider( const Options::Option* option, Minecraft* minecraft ) {
+	std::vector<int> steps = minecraft->options.getSteps(option);
+	if (steps.size() < 2) return;
 
+	Slider* element = new Slider(minecraft, option, steps);
+	element->width = 100;
+	element->height = 20;
+	OptionsItem* item = new OptionsItem(I18n::get(option->getCaptionId()), element);
+	addChild(item);
+	setupPositions();
 }

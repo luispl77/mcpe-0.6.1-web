@@ -1,5 +1,6 @@
 #include "PauseScreen.h"
 #include "StartMenuScreen.h"
+#include "OptionsScreen.h"
 #include "../components/ImageButton.h"
 #include "../../Minecraft.h"
 #include "../../../util/Mth.h"
@@ -10,6 +11,7 @@ PauseScreen::PauseScreen(bool wasBackPaused)
 :	saveStep(0),
 	visibleTime(0),
 	bContinue(0),
+	bOptions(0),
 	bQuit(0),
 	bQuitAndSaveLocally(0),
 	bServerVisibility(0),
@@ -36,6 +38,7 @@ PauseScreen::PauseScreen(bool wasBackPaused)
 
 PauseScreen::~PauseScreen() {
 	delete bContinue;
+	delete bOptions;
 	delete bQuit;
 	delete bQuitAndSaveLocally;
 	delete bServerVisibility;
@@ -48,16 +51,19 @@ void PauseScreen::init() {
 		bQuit = new Touch::TButton(2, "Quit to title");
 		bQuitAndSaveLocally = new Touch::TButton(3, "Quit and copy map");
 		bServerVisibility = new Touch::TButton(4, "");
+		bOptions = new Touch::TButton(6, "Options");
 //		bThirdPerson = new Touch::TButton(5, "Toggle 3:rd person view");
 	} else {
 		bContinue = new Button(1, "Back to game");
 		bQuit = new Button(2, "Quit to title");
 		bQuitAndSaveLocally = new Button(3, "Quit and copy map");
 		bServerVisibility = new Button(4, "");
+		bOptions = new Button(6, "Options");
 //		bThirdPerson = new Button(5, "Toggle 3:rd person view");
 	}
 
 	buttons.push_back(bContinue);
+	buttons.push_back(bOptions);
 	buttons.push_back(bQuit);
 
 	bSound.updateImage(&minecraft->options);
@@ -101,19 +107,23 @@ void PauseScreen::setupPositions() {
 
 	bContinue->width = bQuit->width = /*bThirdPerson->w =*/ 160;
 	bQuitAndSaveLocally->width = bServerVisibility->width = 160;
+	bOptions->width = 160;
 
 	bContinue->x = (width - bContinue->width) / 2;
 	bContinue->y = yBase + 32 * 1;
 
+	bOptions->x = (width - bOptions->width) / 2;
+	bOptions->y = yBase + 32 * 2;
+
 	bQuit->x = (width - bQuit->width) / 2;
-	bQuit->y = yBase + 32 * 2;
+	bQuit->y = yBase + 32 * 3;
 
 #if APPLE_DEMO_PROMOTION
     bQuit->y += 16;
 #endif
-    
+
 	bQuitAndSaveLocally->x = bServerVisibility->x = (width - bQuitAndSaveLocally->width) / 2;
-	bQuitAndSaveLocally->y = bServerVisibility->y = yBase + 32 * 3;
+	bQuitAndSaveLocally->y = bServerVisibility->y = yBase + 32 * 4;
 
 	bSound.y = bThirdPerson.y = 8;
 	bSound.x = 4;
@@ -150,6 +160,11 @@ void PauseScreen::buttonClicked(Button* button) {
 	if (button->id == bContinue->id) {
 		minecraft->setScreen(NULL);
 		//minecraft->grabMouse();
+	}
+	if (button->id == bOptions->id) {
+		// Close returns here rather than to the title screen, which would mean
+		// leaving the world just to change the mouse sensitivity.
+		minecraft->setScreen(new OptionsScreen(SCREEN_PAUSE));
 	}
     if (button->id == bQuit->id) {
 		minecraft->leaveGame();

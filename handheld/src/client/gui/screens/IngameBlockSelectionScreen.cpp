@@ -192,7 +192,11 @@ void IngameBlockSelectionScreen::keyPressed(int eventKey)
 	if (eventKey == o.keyMenuOk.key)
 		selectSlotAndClose();
 
-#ifdef RPI
+	// This override replaces Screen::keyPressed rather than extending it, so
+	// the base class's Escape handling never runs and Escape has to be matched
+	// here. It only was under RPI, which left every other keyboard target able
+	// to open the inventory but not to close it -- keyMenuCancel is backspace.
+#if defined(RPI) || defined(MC_SDL2)
 	if (eventKey == o.keyMenuCancel.key
 		||	eventKey == Keyboard::KEY_ESCAPE)
 		minecraft->setScreen(NULL);

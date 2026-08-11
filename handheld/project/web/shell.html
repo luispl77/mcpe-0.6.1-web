@@ -69,6 +69,12 @@
       <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp;·&nbsp;
       <kbd>Space</kbd> jump &nbsp;·&nbsp;
       <kbd>Esc</kbd> release cursor, again to pause
+      <br>
+      <kbd>1</kbd>–<kbd>9</kbd> hotbar &nbsp;·&nbsp;
+      <kbd>E</kbd> inventory &nbsp;·&nbsp;
+      <kbd>Q</kbd> crafting &nbsp;·&nbsp;
+      <kbd>G</kbd> armour &nbsp;·&nbsp;
+      sensitivity and render distance under <b>Options</b>
     </div>
 
     <div id="saves">
@@ -127,8 +133,8 @@
       if (!window.Module || !Module._mcpe_resize) return;
 
       var full = document.fullscreenElement != null;
-      // Leave room for the hint line and the buttons when not fullscreen.
-      var chromeH = full ? 0 : 116;
+      // Leave room for the two hint lines and the buttons when not fullscreen.
+      var chromeH = full ? 0 : 136;
       var w = Math.max(320, Math.min(MAX_W, Math.floor(window.innerWidth) - (full ? 0 : 16)));
       var h = Math.max(240, Math.min(MAX_H, Math.floor(window.innerHeight) - chromeH));
 

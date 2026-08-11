@@ -1,10 +1,10 @@
-# Minecraft Pocket Edition 0.6.1 — macOS and browser ports
+# Minecraft Pocket Edition 0.6.1, in your browser
 
-The 2013 MCPE 0.6.1 source, ported to run natively on Apple Silicon macOS and in
-a web browser via WebAssembly. Same game that shipped on the iPod touch and
-iPad 2, running at 60fps on hardware that did not exist when it was written.
+The 2013 MCPE 0.6.1 source, ported to WebAssembly. The same game that shipped on
+the iPod touch and iPad 2, running at 60fps in a browser tab on hardware that
+did not exist when it was written.
 
-### ▶ Play it: **https://luispl77.github.io/mcpe-0.6.1-macos/**
+### ▶ Play it: **https://luispl77.github.io/mcpe-0.6.1-web/**
 
 No install, no plugins. Singleplayer, survival or creative. Worlds save in your
 browser and can be downloaded as a `.zip`.
@@ -19,7 +19,7 @@ browser and can be downloaded as a `.zip`.
 0.6.1 is my favourite version of my favourite game, and I wanted to actually
 play it again rather than read about it. The original build targets are long
 dead — Eclipse ADT, `ndk-build`, STLport, a licensing library that no longer
-exists — so the game needed new ones.
+exists — so the game needed a new one.
 
 The encouraging discovery is that the game itself is fine. The simulation,
 worldgen, rendering and entity code all compile clean under a 2026 Clang at
@@ -28,25 +28,22 @@ platform seams around it.
 
 ## What works
 
-| | macOS | Browser |
-|---|---|---|
-| Worldgen, save, reload | ✅ | ✅ |
-| 60 fps | ✅ | ✅ |
-| Keyboard + mouse, pointer lock | ✅ | ✅ |
-| Sound effects | ✅ | ✅ |
-| Fullscreen | ✅ | ✅ |
-| Music | ❌ | ❌ |
-| Multiplayer | ❌ | ❌ |
+| | |
+|---|---|
+| Worldgen, save, reload | ✅ |
+| 60 fps | ✅ |
+| Keyboard + mouse, pointer lock | ✅ |
+| Sound effects | ✅ |
+| Fullscreen | ✅ |
+| Options that persist | ✅ |
+| Music | ❌ |
+| Multiplayer | ❌ |
 
 **Multiplayer** cannot work in the browser — RakNet needs raw UDP sockets and
-browsers have none. It's disabled on both targets rather than half-working.
+browsers have none. It's disabled rather than half-working.
 
 **Music** was streamed from assets that aren't in the compiled-in PCM sound
 bank, so there's nothing to play. Sound effects are all present.
-
-**The options screen is nearly empty.** That's how the leaked source is:
-`OptionsScreen::generateOptionScreens()` has every pane except sensitivity
-commented out. Not a port bug — and probably the easiest thing to fix first.
 
 ## Controls
 
@@ -55,11 +52,28 @@ commented out. Not a port bug — and probably the easiest thing to fix first.
 | `W` `A` `S` `D` / arrows | Move |
 | `Space` | Jump |
 | Mouse | Look — **click the game first** to capture the cursor |
+| Left click | Dig |
+| Right click | Place |
+| `1`–`9` | Select hotbar slot |
+| Scroll wheel | Cycle hotbar slot |
+| `E` | Inventory |
+| `Q` | Crafting (survival only — creative has no crafting in 0.6.1) |
+| `G` | Armour |
 | `Esc` | Release the cursor; press again for the pause menu |
-| Left click | Dig · Right click | Place |
 
 In the browser the first `Esc` is consumed by the browser itself to exit pointer
 lock, which is why it takes two presses to reach the menu.
+
+## Options
+
+Reachable from the title screen **and** from the in-game pause menu. Mouse
+sensitivity, invert-Y, render distance, fancy graphics, smooth lighting, view
+bobbing, third-person and sound volume — and they now survive a reload, which
+they never did in the original source (see below).
+
+**Render distance is the dial to reach for if it runs slowly.** This is a
+fixed-function renderer running on WebGL emulation, so view range is most of the
+frame budget.
 
 ## Your worlds
 
@@ -71,16 +85,7 @@ browser profile and recovering from the zip.
 
 ## Building
 
-**macOS** — needs SDL2, libpng and zlib from Homebrew:
-
-```sh
-cd handheld/project/macos
-cmake -S . -B build -DCMAKE_PREFIX_PATH=/opt/homebrew
-cmake --build build -j8
-./build/minecraftpe
-```
-
-**Browser** — needs [emsdk](https://emscripten.org/docs/getting_started/downloads.html):
+Needs [emsdk](https://emscripten.org/docs/getting_started/downloads.html):
 
 ```sh
 source ~/emsdk/emsdk_env.sh
@@ -90,14 +95,20 @@ cmake --build build -j8
 cd build && python3 -m http.server 8000   # must be served over http, not file://
 ```
 
+Deploying is a manual GitHub Actions run: `gh workflow run pages.yml --ref main`.
+
 ## The interesting bugs
 
 Nearly every problem came from one root cause: **in this codebase `__APPLE__`
-means iOS.** Every desktop and web target keeps falling into mobile-only paths.
-That single confusion produced six separate bugs — GL headers, PVRTC textures,
-Xperia Play input handling, Android D-pad keycodes overriding WASD, the excluded
-PCM sound bank, and the sound backend selection. `grep -rn "__APPLE__" handheld/src`
-is the first thing to try when something misbehaves.
+means iOS**, and anything not Android/iOS/Win32 falls into mobile-only paths.
+That single confusion produced most of the port work — GL headers, PVRTC
+textures, Xperia Play input handling, Android D-pad keycodes overriding WASD,
+the excluded PCM sound bank, and the sound backend selection.
+
+The same shape shows up in the input code, where whole features were gated to
+`WIN32 || RPI` and so simply didn't exist anywhere else: number keys selecting
+hotbar slots, Escape closing the inventory, Escape opening the pause menu at
+all. None of these were broken so much as unreachable.
 
 The best one was in `anGenBuffers()`:
 
@@ -113,10 +124,20 @@ unused buffer name just creates the object. WebGL names are opaque objects that
 must come from `createBuffer`, so every draw call in the game failed with
 `bufferData: no buffer`. The entire renderer came up from that one fix.
 
-Pointer lock was similar: browsers only grant it inside a user gesture, but the
-game grabs the mouse from its frame callback, and `mouseGrabbed` was set anyway
-— so the game believed it held a cursor the browser had refused, and never asked
-again.
+Options persistence turned out to be three independent breakages stacked on each
+other: `Options::save()` assembled every setting into a vector and then returned
+without writing it; `OptionsFile::getOptionStrings()` opened the file with `"w"`,
+which truncates it and yields a stream that cannot be read, so loading both
+returned nothing *and* destroyed the file; and the writer emitted `key:value` on
+one line while the reader expected key and value on alternating lines. Nothing
+had ever persisted. Sensitivity had a fourth problem on top — the saved value
+was the curve-transformed one, which got re-transformed on every load, so it
+would have crept upwards each run had it ever been read back.
+
+Pointer lock was similar in spirit: browsers only grant it inside a user
+gesture, but the game grabs the mouse from its frame callback, and
+`mouseGrabbed` was set anyway — so the game believed it held a cursor the
+browser had refused, and never asked again.
 
 WebGL has no fixed-function pipeline at all, so the renderer runs on
 Emscripten's `-sLEGACY_GL_EMULATION` with `GL_FFP_ONLY=1`, which applies cleanly
@@ -126,19 +147,16 @@ because the game never binds a shader of its own.
 
 ```
 handheld/src/              the game (~1350 files, C++03)
-handheld/project/macos/    macOS CMake target
 handheld/project/web/      Emscripten target + HTML shell
-handheld/src/main_sdl.h    shared SDL2 entry point, both targets
-handheld/src/AppPlatform_sdl.*  shared platform layer
+handheld/src/main_sdl.h    SDL2 entry point
+handheld/src/AppPlatform_sdl.*  platform layer
 ```
-
-The two targets share everything except the text-input dialog (Cocoa `NSAlert`
-vs JS `prompt`) and the main loop, where the browser owns the event loop.
 
 ## Source
 
-This is the leaked 2013 MCPE 0.6.1 handheld source. It originated from an
-Internet Archive upload — **TODO: original archive.org link goes here.**
+This is the leaked 2013 MCPE 0.6.1 handheld source, taken from the Internet
+Archive upload at
+**https://archive.org/details/Minecraftpesorucecode**.
 
 `main` began as a pristine import of that tree (commit `58e1dea`); every commit
 after it is porting work, so `git log` is an exact record of what was changed

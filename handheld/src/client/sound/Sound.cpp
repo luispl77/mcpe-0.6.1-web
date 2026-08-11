@@ -1,6 +1,6 @@
 #include "Sound.h"
 
-#if !defined(PRE_ANDROID23) && !defined(RPI) && (!defined(__APPLE__) || defined(MC_MACOS))
+#if !defined(PRE_ANDROID23) && !defined(RPI) && !defined(__APPLE__)
 
 #include "data/cloth1.pcm"
 #include "data/cloth2.pcm"

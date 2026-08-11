@@ -106,8 +106,12 @@ public:
 
 	float music;
     float sound;
-    //note: sensitivity is transformed in Options::update
+    // `sensitivity` is the transformed value the input code multiplies by;
+    // `sensitivityRaw` is the [0,1] the slider shows and the file stores.
+    // Keeping only the transformed one (as the original did) meant every
+    // save/load cycle ran the curve again and the value crept upwards.
     float sensitivity;
+    float sensitivityRaw;
     bool invertYMouse;
     int viewDistance;
     bool bobView;
@@ -178,6 +182,20 @@ public:
 
 	void initDefaultValues();
 
+	/** Where options.txt lives. Call before update()/save(). */
+	void setStorageDirectory(const std::string& dir) { optionsFile.setDirectory(dir); }
+
+	/** Maps the [0,1] the player picks onto the range the turn code wants.
+	    Centre stays near 0.5 so the default still feels like the default. */
+	static float transformSensitivity(float raw);
+
+	/** Sets both halves of the sensitivity pair from a raw [0,1] value. */
+	void setSensitivity(float raw);
+
+	/** Drops and rebuilds the chunk meshes. A no-op before a level is loaded,
+	    which is what makes it safe to call from the title-screen options. */
+	void rebuildChunks();
+
     std::string getKeyDescription(int i) {
         //Language language = Language.getInstance();
         //return language.getElement(keyMappings[i].name);
@@ -202,7 +220,7 @@ public:
             sound = value;
             //minecraft.soundEngine.updateOptions();
         } else if (item == &Option::SENSITIVITY) {
-            sensitivity = value;
+            setSensitivity(value);
 		} else if (item == &Option::PIXELS_PER_MILLIMETER) {
 			 pixelsPerMillimeter = value;
 		}
@@ -212,7 +230,13 @@ public:
 		if(item == &Option::DIFFICULTY) {
 			difficulty = value;
 		}
+		if(item == &Option::RENDER_DISTANCE) {
+			// LevelRenderer::render notices the change and calls allChanged()
+			// itself, so there is nothing to rebuild from here.
+			viewDistance = value;
+		}
 		notifyOptionUpdate(item, value);
+		save();
 	}
 
     void toggle(const Option* option, int dir) {
@@ -235,11 +259,13 @@ public:
         if (option == &Option::DIFFICULTY) difficulty = (difficulty + dir) & 3;
         if (option == &Option::GRAPHICS) {
             fancyGraphics = !fancyGraphics;
-            //minecraft->levelRenderer.allChanged();
+            // Leaf tiles pick fancy/fast up in allChanged(), so without this
+            // the toggle does nothing until the next world load.
+            rebuildChunks();
         }
         if (option == &Option::AMBIENT_OCCLUSION) {
             ambientOcclusion = !ambientOcclusion;
-            //minecraft->levelRenderer.allChanged();
+            rebuildChunks();
         }
 		notifyOptionUpdate(option, getBooleanValue(option));
         save();
@@ -247,13 +273,14 @@ public:
 
 	int getIntValue(const Option* item) {
 		if(item == &Option::DIFFICULTY) return difficulty;
+		if(item == &Option::RENDER_DISTANCE) return viewDistance;
 		return 0;
 	}
 
     float getProgressValue(const Option* item) {
         if (item == &Option::MUSIC) return music;
         if (item == &Option::SOUND) return sound;
-        if (item == &Option::SENSITIVITY) return sensitivity;
+        if (item == &Option::SENSITIVITY) return sensitivityRaw;
 		if (item == &Option::PIXELS_PER_MILLIMETER) return pixelsPerMillimeter;
         return 0;
     }
@@ -269,6 +296,8 @@ public:
             return limitFramerate;
         if (item == &Option::AMBIENT_OCCLUSION)
             return ambientOcclusion;
+        if (item == &Option::GRAPHICS)
+            return fancyGraphics;
         if (item == &Option::THIRD_PERSON)
             return thirdPersonView;
         if (item == &Option::HIDE_GUI)
@@ -286,6 +315,20 @@ public:
 		if (item == &Option::DESTROY_VIBRATION)
 			return destroyVibration;
 		return false;
+	}
+
+	/** Notch values for a step slider, left to right. Empty means "no slider". */
+	std::vector<int> getSteps(const Option* item) {
+		std::vector<int> steps;
+		if (item == &Option::RENDER_DISTANCE) {
+			// renderDistance = 16*16 >> viewDistance, so the value counts
+			// *down* as you see further. Ordered so dragging right sees more.
+			steps.push_back(3); // Tiny
+			steps.push_back(2); // Short
+			steps.push_back(1); // Normal
+			steps.push_back(0); // Far
+		}
+		return steps;
 	}
 
 	float getProgrssMin(const Option* item) {

@@ -639,8 +639,8 @@ void Minecraft::tickInput() {
 		return;
 	}
 
-// MC_SDL2 rather than MC_MACOS: this is about having a real pointer to grab,
-// which is true of every SDL desktop target including the browser.
+// MC_SDL2: this is about having a real pointer to grab, as opposed to a
+// touchscreen, which is what the #else branch below assumes.
 #if defined(RPI) || defined(MC_SDL2)
 	// While the mouse is grabbed the cursor is parked wherever it was last seen,
 	// so routing clicks to the GUI would let a dig click also hit the hotbar.
@@ -704,7 +704,10 @@ void Minecraft::tickInput() {
 		if (isPressed) {
 			gui.handleKeyPressed(key);
 
-			#if defined(WIN32) || defined(RPI)//|| defined(_DEBUG) || defined(DEBUG)
+			// Number keys pick a hotbar slot. This was gated to Win32 and the
+			// Pi, so every SDL build -- macOS and web included -- had no way
+			// to change slot but the scroll wheel.
+			#if defined(WIN32) || defined(RPI) || defined(MC_SDL2)
 				if (key >= '0' && key <= '9') {
 					int digit = key - '0';
 					int slot = digit - 1;
@@ -735,6 +738,21 @@ void Minecraft::tickInput() {
 				if (!screen && key == Keyboard::KEY_O || key == 250) {
 					releaseMouse();
 				}
+			#endif
+
+			#if defined(MC_SDL2)
+				// Screen shortcuts. Each key is the one this source had already
+				// chosen for the job -- E is Options::keyBuild, named
+				// "key.inventory"; G is what the Win32 block opened the armour
+				// screen with; Q is keyCraft and is already wired up through
+				// KeyboardInput -- they were just never reachable from an SDL
+				// build. Q only does anything in survival, since creative has
+				// no crafting in this version.
+				if (key == Keyboard::KEY_E)
+					screenChooser.setScreen(SCREEN_BLOCKSELECTION);
+
+				if (key == Keyboard::KEY_G)
+					setScreen(new ArmorScreen());
 			#endif
 			#if defined(WIN32)
 				if (key == Keyboard::KEY_F) {
@@ -1253,6 +1271,11 @@ void Minecraft::setSize(int w, int h) {
 }
 
 void Minecraft::reloadOptions() {
+	// options.txt is otherwise resolved relative to the working directory --
+	// wherever the binary happened to be launched from on the desktop, and a
+	// throwaway MEMFS root in the browser. Put it next to the saves instead.
+	options.setStorageDirectory(externalStoragePath);
+
 	options.update();
 	options.save();
 	bool wasTouchscreen = options.useTouchScreen;

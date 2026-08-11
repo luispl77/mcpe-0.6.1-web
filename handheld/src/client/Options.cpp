@@ -3,6 +3,7 @@
 #include "Minecraft.h"
 #include "../platform/log.h"
 #include "../world/Difficulty.h"
+#include "renderer/LevelRenderer.h"
 #include <cmath>
 #include <sstream>
 /*static*/
@@ -28,7 +29,7 @@ void Options::initDefaultValues() {
 
 	music = 1;
 	sound = 1;
-	sensitivity = 0.5f;
+	setSensitivity(0.5f);
 	invertYMouse = false;
 	viewDistance = 2;
 	bobView = true;
@@ -100,8 +101,9 @@ void Options::initDefaultValues() {
 
 	//renderDebug = true;
 	// Android hardware keycodes (19-23 are DPAD_UP/DOWN/LEFT/RIGHT/CENTER) for
-	// the Xperia Play pad. Desktop macOS keeps the WASD bindings set above.
-	#if !defined(RPI) && !defined(MC_MACOS)
+	// the Xperia Play pad. Note this whole block is reached via __APPLE__ too,
+	// which in this codebase means iOS.
+	#if !defined(RPI)
 		keyUp.key		= 19;
 		keyDown.key		= 20;
 		keyLeft.key		= 21;
@@ -125,6 +127,30 @@ void Options::initDefaultValues() {
 #endif
 }
 
+/*static*/
+float Options::transformSensitivity(float raw)
+{
+	// raw is in range [0,1] with default/center at 0.5 (for aesthetics)
+	// We wanna map it to something like [0.3, 0.9] BUT keep 0.5 @ ~0.5...
+	if (raw < 0.0f) raw = 0.0f;
+	if (raw > 1.0f) raw = 1.0f;
+	return 0.3f + std::pow(1.1f * raw, 1.3f) * 0.42f;
+}
+
+void Options::setSensitivity(float raw)
+{
+	if (raw < 0.0f) raw = 0.0f;
+	if (raw > 1.0f) raw = 1.0f;
+	sensitivityRaw = raw;
+	sensitivity = transformSensitivity(raw);
+}
+
+void Options::rebuildChunks()
+{
+	if (minecraft && minecraft->levelRenderer)
+		minecraft->levelRenderer->allChanged();
+}
+
 const Options::Option
 	Options::Option::MUSIC				 (0, "options.music",		true, false),
 	Options::Option::SOUND				 (1, "options.sound",		true, false),
@@ -135,7 +161,9 @@ const Options::Option
 	Options::Option::ANAGLYPH			 (6, "options.anaglyph",		false, true),
 	Options::Option::LIMIT_FRAMERATE	 (7, "options.limitFramerate",false, true),
 	Options::Option::DIFFICULTY			 (8, "options.difficulty",	false, false),
-	Options::Option::GRAPHICS			 (9, "options.graphics",		false, false),
+	// Fancy vs fast is a two-state choice, so declare it boolean and let it
+	// render as a toggle rather than falling through to the int path.
+	Options::Option::GRAPHICS			 (9, "options.graphics",		false, true),
 	Options::Option::AMBIENT_OCCLUSION	 (10, "options.ao",		false, true),
 	Options::Option::GUI_SCALE			 (11, "options.guiScale",	false, false),
 	Options::Option::THIRD_PERSON		 (12, "options.thirdperson",	false, true),
@@ -187,7 +215,9 @@ const char* Options::GUI_SCALE[] = {
 
 void Options::update()
 {
-	viewDistance = 2;
+	// No `viewDistance = 2` here any more: this runs on every reloadOptions(),
+	// including when the options screen closes, so it threw away the render
+	// distance the player had just chosen.
 	StringVector optionStrings = optionsFile.getOptionStrings();
 	for (unsigned int i = 0; i < optionStrings.size(); i += 2) {
 		const std::string& key = optionStrings[i];
@@ -202,11 +232,8 @@ void Options::update()
 		// Controls
         if (key == OptionStrings::Controls_Sensitivity) {
             float sens;
-            if (readFloat(value, sens)) {
-                // sens is in range [0,1] with default/center at 0.5 (for aesthetics)
-                // We wanna map it to something like [0.3, 0.9] BUT keep 0.5 @ ~0.5...
-                sensitivity = 0.3f + std::pow(1.1f * sens, 1.3f) * 0.42f;
-            }
+            if (readFloat(value, sens))
+                setSensitivity(sens);
         }
 		if (key == OptionStrings::Controls_InvertMouse) {
 			readBool(value, invertYMouse);
@@ -227,6 +254,24 @@ void Options::update()
 		// Graphics
 		if (key == OptionStrings::Graphics_Fancy) {
 			readBool(value, fancyGraphics);
+		}
+		if (key == OptionStrings::Graphics_RenderDistance) {
+			int dist;
+			if (readInt(value, dist) && dist >= 0 && dist <= 3)
+				viewDistance = dist;
+		}
+		if (key == OptionStrings::Graphics_AmbientOcclusion) {
+			readBool(value, ambientOcclusion);
+		}
+		if (key == OptionStrings::Graphics_ViewBobbing) {
+			readBool(value, bobView);
+		}
+
+		// Sound
+		if (key == OptionStrings::Sound_Volume) {
+			float vol;
+			if (readFloat(value, vol))
+				sound = (vol < 0.0f)? 0.0f : (vol > 1.0f? 1.0f : vol);
 		}
 		if (key == OptionStrings::Graphics_LowQuality) {
 			bool isLow;
@@ -301,11 +346,26 @@ void Options::save()
 
 	// Input
 	addOptionToSaveOutput(stringVec, OptionStrings::Controls_InvertMouse, invertYMouse);
-	addOptionToSaveOutput(stringVec, OptionStrings::Controls_Sensitivity, sensitivity);
+	// The raw [0,1], not the transformed value -- update() runs the curve on
+	// whatever it reads, so writing the transformed one compounds it each time.
+	addOptionToSaveOutput(stringVec, OptionStrings::Controls_Sensitivity, sensitivityRaw);
 	addOptionToSaveOutput(stringVec, OptionStrings::Controls_IsLefthanded, isLeftHanded);
 	addOptionToSaveOutput(stringVec, OptionStrings::Controls_UseTouchScreen, useTouchScreen);
 	addOptionToSaveOutput(stringVec, OptionStrings::Controls_UseTouchJoypad, isJoyTouchArea);
 	addOptionToSaveOutput(stringVec, OptionStrings::Controls_FeedbackVibration, destroyVibration);
+
+	// Graphics
+	addOptionToSaveOutput(stringVec, OptionStrings::Graphics_Fancy, fancyGraphics);
+	addOptionToSaveOutput(stringVec, OptionStrings::Graphics_RenderDistance, viewDistance);
+	addOptionToSaveOutput(stringVec, OptionStrings::Graphics_AmbientOcclusion, ambientOcclusion);
+	addOptionToSaveOutput(stringVec, OptionStrings::Graphics_ViewBobbing, bobView);
+
+	// Sound
+	addOptionToSaveOutput(stringVec, OptionStrings::Sound_Volume, sound);
+
+	// ...and actually write it. Everything above used to be assembled into
+	// stringVec and then dropped on the floor when the function returned.
+	optionsFile.save(stringVec);
 // 
 // 	static const Option MUSIC;
 // 	static const Option SOUND;

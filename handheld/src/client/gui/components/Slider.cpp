@@ -25,12 +25,14 @@ Slider::Slider(Minecraft* minecraft, const Options::Option* option, const std::v
 	assert(stepVec.size() > 1);
 	numSteps = sliderSteps.size();
 	if(option != NULL) {
-		curStepValue;
-		int curStep;
+		// `int curStep;` used to be redeclared here, shadowing the member, so
+		// the real one stayed uninitialised and the handle never started on
+		// the current value.
 		curStepValue = minecraft->options.getIntValue(option);
 		std::vector<int>::iterator currentItem = std::find(sliderSteps.begin(), sliderSteps.end(), curStepValue);
 		if(currentItem != sliderSteps.end()) {
 			curStep = currentItem - sliderSteps.begin();
+			percentage = float(curStep) / (numSteps - 1);
 		}
 	}
 }
@@ -63,12 +65,20 @@ void Slider::mouseClicked( Minecraft* minecraft, int x, int y, int buttonNum ) {
 }
 
 void Slider::mouseReleased( Minecraft* minecraft, int x, int y, int buttonNum ) {
+	const bool wasDragging = mouseDownOnElement;
 	mouseDownOnElement = false;
 	if(sliderType == SliderStep) {
 		curStep = Mth::floor((percentage * (numSteps-1) + 0.5f));
+		if (curStep < 0) curStep = 0;
 		curStepValue = sliderSteps[Mth::Min(curStep, numSteps-1)];
 		percentage = float(curStep) / (numSteps - 1);
-		setOption(minecraft);
+		setOption(minecraft);	// this one saves for us
+	}
+	else if (wasDragging) {
+		// A progress slider writes through Options::set on every tick of the
+		// drag; persisting there would be a file write per frame, so the
+		// value is committed once, here.
+		minecraft->options.save();
 	}
 }
 

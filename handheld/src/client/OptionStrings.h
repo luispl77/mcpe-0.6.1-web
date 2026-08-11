@@ -8,6 +8,11 @@ public:
     
     static const char* Graphics_Fancy;
     static const char* Graphics_LowQuality;
+    static const char* Graphics_RenderDistance;
+    static const char* Graphics_AmbientOcclusion;
+    static const char* Graphics_ViewBobbing;
+
+    static const char* Sound_Volume;
     
     static const char* Controls_Sensitivity;
     static const char* Controls_InvertMouse;
