@@ -636,7 +636,9 @@ void Minecraft::tickInput() {
 		return;
 	}
 
-#ifdef RPI
+#if defined(RPI) || defined(MC_MACOS)
+	// While the mouse is grabbed the cursor is parked wherever it was last seen,
+	// so routing clicks to the GUI would let a dig click also hit the hotbar.
 	bool mouseDiggable = true;
 	bool allowGuiClicks = !mouseGrabbed;
 #else
@@ -654,7 +656,7 @@ void Minecraft::tickInput() {
 
 		const MouseAction& e = Mouse::getEvent();
 
-#ifdef RPI // If clicked when not having focus, get focus @keyboard
+#if defined(RPI) || defined(MC_MACOS) // If clicked when not having focus, get focus @keyboard
 		if (!mouseGrabbed) {
 			if (!screen && e.data == MouseAction::DATA_DOWN) {
 				grabMouse();
@@ -835,7 +837,16 @@ void Minecraft::tickInput() {
 				}
 			#endif
 
-			#ifndef RPI
+			#if defined(MC_MACOS)
+				// Escape hands the cursor back first; pressing it again (with
+				// the mouse already free) opens the pause menu.
+				if (key == Keyboard::KEY_ESCAPE) {
+					if (mouseGrabbed)
+						releaseMouse();
+					else
+						pauseGame(false);
+				}
+			#elif !defined(RPI)
 				if (key == 82)
 					pauseGame(false);
 			#else
@@ -1138,11 +1149,16 @@ bool Minecraft::supportNonTouchScreen() {
 void Minecraft::init()
 {
 	options.minecraft = this;
+#ifndef STANDALONE_SERVER
+	// Has to be known *before* initDefaultValues(), which picks the touch vs
+	// keyboard control defaults from supportNonTouchScreen(). It used to be set
+	// afterwards, so the default read back as the constructor's `false` and
+	// every platform silently forced useTouchScreen on.
+	_supportsNonTouchscreen = !platform()->supportsTouchscreen();
+#endif
 	options.initDefaultValues();
 #ifndef STANDALONE_SERVER
 	checkGlError("Init enter");
-
-	_supportsNonTouchscreen = !platform()->supportsTouchscreen();
 
 	LOGI("IS TOUCHSCREEN? %d\n", options.useTouchScreen);
 

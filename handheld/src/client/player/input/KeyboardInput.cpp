@@ -1,5 +1,6 @@
 #include "KeyboardInput.h"
 #include "../../Options.h"
+#include "../../../platform/input/Keyboard.h"
 #include "../../../world/entity/player/Player.h"
 
 KeyboardInput::KeyboardInput( Options* options )
@@ -19,6 +20,13 @@ void KeyboardInput::setKey( int key, bool state )
 	if (key == options->keyJump.key) id = KEY_JUMP;
 	if (key == options->keySneak.key) id = KEY_SNEAK;
 	if (key == options->keyCraft.key) id = KEY_CRAFT;
+
+	// Arrow keys move as well as WASD; they aren't part of the rebindable set,
+	// so they're matched separately rather than through Options.
+	if (key == Keyboard::KEY_ARROW_UP)    id = KEY_UP;
+	if (key == Keyboard::KEY_ARROW_DOWN)  id = KEY_DOWN;
+	if (key == Keyboard::KEY_ARROW_LEFT)  id = KEY_LEFT;
+	if (key == Keyboard::KEY_ARROW_RIGHT) id = KEY_RIGHT;
 	//printf("key: %d\n", id);
 	if (id >= 0) {
 		keys[id] = state;
