@@ -9,22 +9,29 @@ class SoundDesc
 {
 public:
 	SoundDesc()
-	:	buffer(0)
+	:	buffer(0),
+		ownsBuffer(false)
 	{}
 
+    /// Takes ownership of `data`, which must come from new char[].
+    /// Used by the iOS AAC loader in SoundEngine.mm.
     SoundDesc(char* data, int size, int channels, int width, int rate)
     :   buffer(data),
         frames(data),
         size(size),
         channels(channels),
         byteWidth(width),
-        frameRate(rate)
+        frameRate(rate),
+        ownsBuffer(true)
     {
         numFrames = size / (channels * byteWidth);
     }
 
+	/// Wraps one of the compiled-in PCM arrays from client/sound/data. That
+	/// memory is static, so this SoundDesc must never free it.
 	SoundDesc(char* data)
-	:	buffer(data)
+	:	buffer(data),
+		ownsBuffer(false)
 	{
 		// header [INT][Channels, BytePerSample, FrameRate, NumFrames]
 		channels  = *((int*)&data[0]);
@@ -41,9 +48,12 @@ public:
         return ((float)numFrames) / frameRate;
     }
 
+    /// SoundSystemAL::getBufferId() calls this after uploading the samples to
+    /// OpenAL. That's only safe for buffers this SoundDesc actually owns --
+    /// freeing a compiled-in PCM array aborts in malloc.
     void destroy() const {
-        if (isValid()) {
-            delete buffer;
+        if (isValid() && ownsBuffer) {
+            delete[] buffer;
             buffer = 0;
         }
     }
@@ -59,6 +69,7 @@ public:
     std::string name;
 private:
 	mutable char* buffer;
+	bool ownsBuffer;
 };
 
 // iOS loaded AAC through SoundEngine.mm instead of this built-in PCM bank, so
