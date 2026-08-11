@@ -639,7 +639,9 @@ void Minecraft::tickInput() {
 		return;
 	}
 
-#if defined(RPI) || defined(MC_MACOS)
+// MC_SDL2 rather than MC_MACOS: this is about having a real pointer to grab,
+// which is true of every SDL desktop target including the browser.
+#if defined(RPI) || defined(MC_SDL2)
 	// While the mouse is grabbed the cursor is parked wherever it was last seen,
 	// so routing clicks to the GUI would let a dig click also hit the hotbar.
 	bool mouseDiggable = true;
@@ -659,7 +661,9 @@ void Minecraft::tickInput() {
 
 		const MouseAction& e = Mouse::getEvent();
 
-#if defined(RPI) || defined(MC_MACOS) // If clicked when not having focus, get focus @keyboard
+// On the web this click is doubly important: browsers only grant pointer lock
+// from inside a user gesture, so the grab has to originate from a real click.
+#if defined(RPI) || defined(MC_SDL2) // If clicked when not having focus, get focus @keyboard
 		if (!mouseGrabbed) {
 			if (!screen && e.data == MouseAction::DATA_DOWN) {
 				grabMouse();
@@ -840,9 +844,15 @@ void Minecraft::tickInput() {
 				}
 			#endif
 
-			#if defined(MC_MACOS)
+			#if defined(MC_SDL2)
 				// Escape hands the cursor back first; pressing it again (with
 				// the mouse already free) opens the pause menu.
+				//
+				// In a browser the first step is done for us: Escape is how the
+				// user exits pointer lock, and the browser swallows that
+				// keypress rather than delivering it. main_sdl.h watches for the
+				// lock being dropped and releases the grab to match, so the
+				// second press -- which does arrive -- lands here and pauses.
 				if (key == Keyboard::KEY_ESCAPE) {
 					if (mouseGrabbed)
 						releaseMouse();

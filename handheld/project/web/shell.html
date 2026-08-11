@@ -20,7 +20,8 @@
     align-items: center;
     justify-content: center;
     height: 100%;
-    gap: 10px;
+    gap: 8px;
+    background: #1a1a1a;
   }
   /* No border or focus ring: the canvas is grabbed for pointer lock and an
      outline flashing on every click is distracting. */
@@ -28,11 +29,16 @@
     display: block;
     background: #000;
     outline: none;
-    max-width: 100%;
-    max-height: 72vh;
-    /* Keep the blocky textures blocky when the canvas is scaled up. */
+    /* Keep the blocky textures blocky. */
     image-rendering: pixelated;
   }
+  /* In fullscreen the canvas is the only thing that should be on screen. */
+  #wrap:fullscreen #status,
+  #wrap:fullscreen #hint,
+  #wrap:fullscreen #saves,
+  #wrap:fullscreen #saveMsg { display: none; }
+  #wrap:fullscreen { gap: 0; }
+
   #status { font-size: 13px; min-height: 1.2em; }
   #hint { font-size: 12px; color: #888; text-align: center; line-height: 1.6; }
   #hint kbd { background: #333; border-radius: 3px; padding: 1px 5px; color: #ccc; }
@@ -59,12 +65,14 @@
             oncontextmenu="event.preventDefault()"></canvas>
 
     <div id="hint">
+      <b>Click the game</b> to capture the mouse &nbsp;·&nbsp;
       <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move &nbsp;·&nbsp;
-      <kbd>Space</kbd> jump &nbsp;·&nbsp; mouse to look &nbsp;·&nbsp;
-      <kbd>Esc</kbd> release cursor
+      <kbd>Space</kbd> jump &nbsp;·&nbsp;
+      <kbd>Esc</kbd> release cursor, again to pause
     </div>
 
     <div id="saves">
+      <button id="fullscreenBtn">Fullscreen</button>
       <button id="exportBtn" disabled>Download worlds</button>
       <button id="importBtn" disabled>Restore worlds…</button>
       <input id="importFile" type="file" accept=".zip,application/zip" hidden>
@@ -87,6 +95,7 @@
         statusEl.textContent = '';
         document.getElementById('exportBtn').disabled = false;
         document.getElementById('importBtn').disabled = false;
+        fitCanvas();
       }
     };
 
@@ -96,6 +105,81 @@
     canvas.addEventListener('click', function () { canvas.focus(); });
 
     window.onerror = function (message) { statusEl.textContent = 'Error: ' + message; };
+  </script>
+
+  <script>
+  // ---------------------------------------------------------------------------
+  // Canvas sizing, fullscreen, and keeping the game's grab state in step with
+  // the browser's pointer lock.
+  // ---------------------------------------------------------------------------
+  (function () {
+    var wrap = document.getElementById('wrap');
+    var canvas = document.getElementById('canvas');
+
+    // Rendering is done at CSS pixel size rather than device pixels. It keeps
+    // pointer coordinates a straight 1:1 with the canvas (no scaling factor to
+    // get wrong), and this is a fill-rate-bound fixed-function renderer, so
+    // quadrupling the pixels on a retina display costs far more than it adds to
+    // art drawn at 16x16. The cap keeps a large monitor from doing the same.
+    var MAX_W = 1920, MAX_H = 1080;
+
+    function fitCanvas() {
+      if (!window.Module || !Module._mcpe_resize) return;
+
+      var full = document.fullscreenElement != null;
+      // Leave room for the hint line and the buttons when not fullscreen.
+      var chromeH = full ? 0 : 116;
+      var w = Math.max(320, Math.min(MAX_W, Math.floor(window.innerWidth) - (full ? 0 : 16)));
+      var h = Math.max(240, Math.min(MAX_H, Math.floor(window.innerHeight) - chromeH));
+
+      if (canvas.width === w && canvas.height === h) return;
+
+      // SDL_SetWindowSize sets the backing store; the CSS size is set to match
+      // so that one canvas pixel is one page pixel.
+      Module._mcpe_resize(w, h);
+      canvas.style.width = w + 'px';
+      canvas.style.height = h + 'px';
+    }
+    window.fitCanvas = fitCanvas;
+
+    var pending = null;
+    function scheduleFit() {
+      clearTimeout(pending);
+      pending = setTimeout(fitCanvas, 120);
+    }
+
+    window.addEventListener('resize', scheduleFit);
+    document.addEventListener('fullscreenchange', function () {
+      // Fullscreen transitions animate; re-fit once the new size has settled.
+      fitCanvas();
+      scheduleFit();
+    });
+
+    document.getElementById('fullscreenBtn').addEventListener('click', function () {
+      if (document.fullscreenElement) document.exitFullscreen();
+      else wrap.requestFullscreen().catch(function () { /* user said no */ });
+      canvas.focus();
+    });
+
+    // MouseHandler::grab() sets window.mcpeWantPointerLock but cannot ask for
+    // the lock itself -- the browser only grants it from inside a user gesture,
+    // and the game grabs from its frame callback. This listener is that gesture.
+    canvas.addEventListener('mousedown', function () {
+      if (!window.mcpeWantPointerLock || document.pointerLockElement) return;
+      var req = canvas.requestPointerLock();
+      // Chrome briefly refuses re-locking right after the user pressed Escape;
+      // that is the browser protecting them, so let it go quietly.
+      if (req && req.catch) req.catch(function () {});
+    });
+
+    // Escape belongs to the browser while the pointer is locked: it exits the
+    // lock and the keypress never reaches the page. Tell the game so it stops
+    // believing it still holds the cursor.
+    document.addEventListener('pointerlockchange', function () {
+      if (!document.pointerLockElement && window.Module && Module._mcpe_pointerlock_lost)
+        Module._mcpe_pointerlock_lost();
+    });
+  })();
   </script>
 
   <script>

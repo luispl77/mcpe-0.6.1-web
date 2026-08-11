@@ -97,6 +97,44 @@ extern "C" EMSCRIPTEN_KEEPALIVE void mcpe_storage_ready()
 {
 	g_storageReady = true;
 }
+
+/** Called from the page when the browser drops pointer lock.
+
+    The browser owns Escape while the pointer is locked -- it uses it to exit
+    lock and does not deliver the keypress -- so without this the game would go
+    on believing it still had the cursor: the world would keep swallowing clicks
+    and mouse movement would still turn the player. Releasing the grab here
+    keeps the game's idea of the cursor in step with the browser's, and leaves
+    Escape behaving as it does on the desktop, one step at a time. */
+extern "C" EMSCRIPTEN_KEEPALIVE void mcpe_pointerlock_lost()
+{
+	if (g_state.app && g_state.app->mouseGrabbed)
+		g_state.app->releaseMouse();
+}
+
+/** Called from the page whenever the canvas needs to be a different size --
+    window resize, or entering and leaving fullscreen.
+
+    SDL_SetWindowSize is what actually resizes the canvas under Emscripten, and
+    it does not come back as a window event, so the app is told directly. */
+extern "C" EMSCRIPTEN_KEEPALIVE void mcpe_resize(int width, int height)
+{
+	if (width <= 0 || height <= 0 || !g_window)
+		return;
+
+	SDL_SetWindowSize(g_window, width, height);
+
+	g_state.windowWidth = g_state.drawableWidth = width;
+	g_state.windowHeight = g_state.drawableHeight = height;
+	// The canvas backing store is kept equal to its CSS size, so pointer
+	// coordinates need no scaling.
+	g_state.mouseScaleX = g_state.mouseScaleY = 1.0f;
+
+	if (g_state.appContext.platform)
+		((AppPlatform_sdl*)g_state.appContext.platform)->setScreenSize(width, height);
+	if (g_state.app)
+		g_state.app->setSize(width, height);
+}
 #endif
 
 static void handleEvent(const SDL_Event& event)
