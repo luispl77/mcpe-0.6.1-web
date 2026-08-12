@@ -180,6 +180,7 @@ Minecraft::Minecraft()
 	_hasSignaledGeneratingLevelFinished(true),
 	_prepChunkIndex(0),
 	_prepInProgress(false),
+	_prepPhase(0),
 	generateLevelThread(NULL),
 	progressStagePercentage(0),
 	progressStageStatusId(0),
@@ -412,7 +413,11 @@ void Minecraft::prepareLevelBegin() {
 	if (!level->isNew())
 		level->setUpdateLights(false);
 
+	// Both reset here rather than at construction: this runs for every world
+	// load, and a second one starting at the phase the first finished on would
+	// skip straight past generating anything.
 	_prepChunkIndex = 0;
+	_prepPhase = 0;
 }
 
 /** The expensive pass: one getTile per chunk column, which is what actually
@@ -449,6 +454,11 @@ bool Minecraft::prepareLevelChunkStep(int maxIterations) {
 }
 
 void Minecraft::prepareLevelFinish() {
+	prepareLevelSave();
+	prepareLevelPrepare();
+}
+
+void Minecraft::prepareLevelSave() {
 	level->setUpdateLights(true);
 
 	for (int x = 0; x < CHUNK_CACHE_WIDTH; x++)
@@ -476,6 +486,9 @@ void Minecraft::prepareLevelFinish() {
 		level->loadEntities();
 	}
 
+}
+
+void Minecraft::prepareLevelPrepare() {
 	progressStagePercentage = -1;
 	progressStageStatusId = 2;
 	LOGI("status: 2\n");
@@ -607,15 +620,34 @@ void Minecraft::tick(int nTick, int maxTick) {
 		   7%. Taking them singly bounds a stall to whatever one column costs,
 		   and the budget still lets a fast machine chew through many per frame
 		   rather than stretching a quick load over 256 needless frames. */
+		/* Three phases with a drawn frame between them. The two tails cannot be
+		   sliced -- saving the chunks and level->prepare() are each one call --
+		   so what the frame in between buys is the stage *name* being on screen
+		   before the work that earns it starts. Without it the last thing drawn
+		   was the bar at 97% and it sat there through both, which is the same
+		   complaint as the frozen menu, just shorter. */
 		if (_prepInProgress) {
-			const int sliceStart = getTimeMs();
-			bool prepDone;
-			do {
-				prepDone = prepareLevelChunkStep(1);
-			} while (!prepDone && (getTimeMs() - sliceStart) < 16);
+			if (_prepPhase == 0) {
+				const int sliceStart = getTimeMs();
+				bool passDone;
+				do {
+					passDone = prepareLevelChunkStep(1);
+				} while (!passDone && (getTimeMs() - sliceStart) < 16);
 
-			if (prepDone) {
-				prepareLevelFinish();
+				if (passDone) {
+					// Painted next frame, before prepareLevelSave blocks.
+					progressStageStatusId = 3;
+					_prepPhase = 1;
+				}
+			} else if (_prepPhase == 1) {
+				prepareLevelSave();
+				// prepareLevelSave leaves the id on 3; move it on so the frame
+				// after this one says "Preparing" rather than "Saving chunks".
+				progressStagePercentage = -1;
+				progressStageStatusId = 2;
+				_prepPhase = 2;
+			} else {
+				prepareLevelPrepare();
 				_prepInProgress = false;
 				// What generateLevel() does at the end of the blocking path; the
 				// next update() picks it up and calls _levelGenerated().

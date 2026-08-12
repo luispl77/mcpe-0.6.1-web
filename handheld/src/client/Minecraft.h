@@ -118,6 +118,12 @@ public:
 	/// Runs at most maxIterations of the chunk pass, or all of them when
 	/// maxIterations <= 0. Returns true once the pass is finished.
 	bool prepareLevelChunkStep(int maxIterations);
+	/// The two blocking tails, split so the web can paint the stage name that
+	/// goes with each before it starts. progressMessages has had "Saving chunks"
+	/// and "Preparing" in it since 2013; on the web neither was ever on screen,
+	/// because both ran inside one frame after the last one the bar drew.
+	void prepareLevelSave();
+	void prepareLevelPrepare();
 	void prepareLevelFinish();
 
 	void leaveGame(bool renameLevel = false);
@@ -236,6 +242,8 @@ protected:
 	int _prepChunkIndex;
 	/// Set while the web is driving prepareLevel a slice at a time.
 	bool _prepInProgress;
+	/// 0 chunk pass, 1 save, 2 prepare -- one frame drawn between each.
+	int _prepPhase;
 
 	LevelStorageSource* storageSource;
 	bool _running;
