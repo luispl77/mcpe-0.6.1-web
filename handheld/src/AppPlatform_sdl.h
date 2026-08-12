@@ -28,15 +28,19 @@ public:
 		_width(width),
 		_height(height),
 		_touchscreen(touchscreen),
-		_userInputStatus(USERINPUT_NOTINITED)
+		_userInputStatus(USERINPUT_NOTINITED),
+		_dialogFields(0)
 	{}
 
 	/** The game asks the platform to collect text (world name, chat line, ...)
 	    through showDialog() + getUserInputStatus() + getUserInput(). On Android
-	    and iOS that's a native dialog; on macOS it's a Cocoa NSAlert and on the
-	    web a set of JS prompts. Both are run modally, so the answer is already
-	    latched by the time the screen next ticks and getUserInputStatus() can
-	    stay a simple consume-once poll. See the per-target dialog files. */
+	    and iOS that's a native dialog; on the web it is an overlay in the page.
+
+	    The answer arrives whenever the player gives it, which can be many frames
+	    after showDialog() returns. That needs nothing special from the callers:
+	    they poll getUserInputStatus() every tick and treat USERINPUT_NOTINITED
+	    as "keep waiting", so a dialog that takes its time is only a longer wait.
+	    See AppPlatform_sdl_dialog_web.cpp. */
 	void showDialog(int dialogId);
 	int getUserInputStatus();
 	StringVector getUserInput();
@@ -79,6 +83,10 @@ private:
 
 	int _userInputStatus;
 	StringVector _userInput;
+
+	/// How many fields the dialog currently on screen is collecting, and so also
+	/// whether there is one: zero means nothing is waiting to be answered.
+	int _dialogFields;
 };
 
 #endif /*APPPLATFORM_SDL_H__*/

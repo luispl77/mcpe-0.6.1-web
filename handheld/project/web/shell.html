@@ -172,6 +172,62 @@
     z-index: 5;
   }
   html.touch #exit.hidden { display: none; }
+
+  /* ---------------------------------------------------------------------
+     The game's text-entry dialog.
+
+     0.6.1 has no in-game text field -- TextBox is a stub whose whole body
+     asks the platform to open the OS keyboard -- so naming a world has
+     always been the platform's job. This is that dialog for the web. It
+     replaced window.prompt, which could not hold two fields at once, could
+     not be styled to sit in the same world as the game, and cost fullscreen
+     every time it opened.
+     --------------------------------------------------------------------- */
+  #dialog {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right))
+             max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+    box-sizing: border-box;
+    background: rgba(0, 0, 0, 0.65);
+    z-index: 20;
+  }
+  #dialog.hidden { display: none; }
+  #dialogPanel {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    width: 340px;
+    max-width: 100%;
+    max-height: 100%;
+    overflow-y: auto;
+    box-sizing: border-box;
+    padding: 18px 20px;
+    background: #1a1a1a;
+    border: 2px solid #4a4a4a;
+    border-radius: 6px;
+  }
+  #dialogTitle { font-size: 15px; letter-spacing: 0.06em; }
+  .dialogField { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: #999; }
+  .dialogField input {
+    font: inherit;
+    /* 16px exactly: iOS zooms the page when focusing anything smaller, and it
+       ignores user-scalable=no for that. */
+    font-size: 16px;
+    color: #eee;
+    background: #2a2a2a;
+    border: 1px solid #4a4a4a;
+    border-radius: 4px;
+    padding: 8px 10px;
+  }
+  .dialogField input:focus { outline: none; border-color: #4e8a4e; }
+  #dialogButtons { display: flex; gap: 8px; justify-content: flex-end; }
+  #dialogButtons button { font-size: 13px; padding: 8px 16px; }
+  #dialogOk { background: #3b6b3b; border-color: #4e8a4e; color: #eaffea; }
+  #dialogOk:hover:not(:disabled) { background: #457a45; }
 </style>
 </head>
 <body>
@@ -213,6 +269,17 @@
     </div>
 
     <button id="exit" class="hidden" title="Menu" aria-label="Menu">☰</button>
+
+    <div id="dialog" class="hidden">
+      <form id="dialogPanel" autocomplete="off">
+        <div id="dialogTitle"></div>
+        <div id="dialogFields"></div>
+        <div id="dialogButtons">
+          <button type="button" id="dialogCancel">Cancel</button>
+          <button type="submit" id="dialogOk">OK</button>
+        </div>
+      </form>
+    </div>
   </div>
 
   <script>
@@ -476,10 +543,14 @@
     // than sitting in the browser's own chrome. The button is the way back.
 
     // The page itself must not scroll, zoom or bounce -- those gestures belong
-    // to the game. The launch overlay is the one thing that may scroll, since
-    // it can be taller than a phone in landscape.
+    // to the game. The overlays are the exception: both the launch screen and
+    // the text dialog can be taller than a phone held sideways, especially with
+    // the keyboard up, and a panel you cannot scroll to the bottom of is a
+    // button you cannot press.
+    var dialogPanel = document.getElementById('dialogPanel');
     document.addEventListener('touchmove', function (e) {
       if (!launch.classList.contains('hidden') && launch.contains(e.target)) return;
+      if (dialogPanel && dialogPanel.contains(e.target)) return;
       e.preventDefault();
     }, { passive: false });
 
@@ -734,6 +805,101 @@
       importSaves(file).catch(function (e) { say('Restore failed: ' + e.message, true); });
       importFile.value = '';
     });
+  })();
+  </script>
+
+  <script>
+  // ---------------------------------------------------------------------------
+  // The game's text-entry dialog.
+  //
+  // The game asks the platform to collect text -- a world name and seed, a chat
+  // line -- and then polls every tick until an answer turns up. See
+  // AppPlatform_sdl_dialog_web.cpp for the other half, and for why answering
+  // asynchronously needed nothing to change on the game's side.
+  // ---------------------------------------------------------------------------
+  (function () {
+    // Mirrors AppPlatform_sdl::USERINPUT_*.
+    var PENDING = -2, CANCEL = 0, OK = 1;
+
+    var root      = document.getElementById('dialog');
+    var form      = document.getElementById('dialogPanel');
+    var titleEl   = document.getElementById('dialogTitle');
+    var fieldsEl  = document.getElementById('dialogFields');
+    var okBtn     = document.getElementById('dialogOk');
+    var cancelBtn = document.getElementById('dialogCancel');
+    var canvas    = document.getElementById('canvas');
+
+    var state = CANCEL;
+    var values = [];
+    var inputs = [];
+
+    function isOpen() { return !root.classList.contains('hidden'); }
+
+    function close(result) {
+      if (!isOpen()) return;
+      // Read the fields before hiding: blurring an input can change nothing,
+      // but the answer belongs to the moment the player accepted it.
+      values = inputs.map(function (input) { return input.value; });
+      state = result;
+      root.classList.add('hidden');
+      // Hand the keyboard back to the game.
+      if (document.activeElement && document.activeElement.blur)
+        document.activeElement.blur();
+      if (canvas) canvas.focus();
+    }
+
+    form.addEventListener('submit', function (e) { e.preventDefault(); close(OK); });
+    cancelBtn.addEventListener('click', function () { close(CANCEL); });
+
+    // While the panel is up the keyboard belongs to it. SDL installs its own
+    // document listeners when the module loads, which is after this script runs,
+    // so a capture-phase listener here gets there first and can stop the game
+    // reading what is being typed into the box. stopImmediatePropagation rather
+    // than preventDefault: the character still has to reach the input, and Enter
+    // still has to submit the form -- both are default actions, not listeners.
+    ['keydown', 'keyup', 'keypress'].forEach(function (name) {
+      document.addEventListener(name, function (e) {
+        if (!isOpen()) return;
+        if (name === 'keydown' && e.key === 'Escape') close(CANCEL);
+        e.stopImmediatePropagation();
+      }, true);
+    });
+
+    window.mcpeDialog = {
+      open: function (spec) {
+        fieldsEl.innerHTML = '';
+        inputs = [];
+        values = [];
+        titleEl.textContent = spec.title;
+        okBtn.textContent = spec.okLabel || 'OK';
+
+        spec.fields.forEach(function (f) {
+          var label = document.createElement('label');
+          label.className = 'dialogField';
+
+          var caption = document.createElement('span');
+          caption.textContent = f.label;
+
+          var input = document.createElement('input');
+          input.type = 'text';
+          input.value = f.value || '';
+          input.spellcheck = false;
+          input.autocapitalize = 'off';
+
+          label.appendChild(caption);
+          label.appendChild(input);
+          fieldsEl.appendChild(label);
+          inputs.push(input);
+        });
+
+        state = PENDING;
+        root.classList.remove('hidden');
+        if (inputs[0]) { inputs[0].focus(); inputs[0].select(); }
+      },
+
+      status: function () { return state; },
+      value: function (i) { return values[i] != null ? values[i] : ''; }
+    };
   })();
   </script>
 
