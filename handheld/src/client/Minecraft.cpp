@@ -36,6 +36,9 @@
 #include "gui/screens/RenameMPLevelScreen.h"
 #include "sound/SoundEngine.h"
 #endif
+#ifdef __EMSCRIPTEN__
+	#include <emscripten.h>
+#endif
 #include "../platform/CThread.h"
 #include "../platform/input/Mouse.h"
 #include "../AppPlatform.h"
@@ -151,6 +154,8 @@ Minecraft::Minecraft()
 	ticksSinceLastUpdate(0),
 	gameMode(NULL),
 	mouseGrabbed(true),
+	_musicOn(false),
+	_musicVolume(-1.0f),
 	missTime(0),
 	pause(false),
 	_running(false),
@@ -445,6 +450,8 @@ void Minecraft::update() {
 		LOGI(">>>>>>>>>>\n");
 
 	TIMER_PUSH("root");
+
+	updateMusic();
 
 	//if (level) {
 	//	LOGI("numplayers: %d\n", level->players.size());
@@ -1141,6 +1148,36 @@ void Minecraft::setScreen( Screen* screen )
 	} else {
 		grabMouse();
 	}
+#endif
+}
+
+/** Menu music, which 0.6.1 never had. SoundEngine only ever plays one-shots --
+    everything in data/sound is about a second long -- but Options has carried a
+    Music slider since 2013 with nothing behind it, so that is what this drives.
+
+    The track is streamed by the page rather than played through OpenAL: it is
+    two orders of magnitude longer than any sound in the game, and that path
+    decodes a whole file into memory before playing it. See the music block in
+    shell.html.
+
+    Music plays whenever no world is loaded, which is exactly the menus -- the
+    title screen, the level list, the settings -- and stops on the way into a
+    world. This runs every frame, so it only speaks when the answer changes. */
+void Minecraft::updateMusic()
+{
+#if defined(__EMSCRIPTEN__) && !defined(STANDALONE_SERVER)
+	const bool on = (level == NULL) && (options.music > 0.0f);
+	const float volume = options.music;
+
+	if (on == _musicOn && volume == _musicVolume)
+		return;
+
+	_musicOn = on;
+	_musicVolume = volume;
+
+	EM_ASM({
+		if (window.mcpeMusic) window.mcpeMusic.set($0 != 0, $1);
+	}, on ? 1 : 0, (double)volume);
 #endif
 }
 

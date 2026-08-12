@@ -737,6 +737,84 @@
   })();
   </script>
 
+  <script>
+  // ---------------------------------------------------------------------------
+  // Menu music.
+  //
+  // Driven by Minecraft::updateMusic: on whenever no world is loaded, off on the
+  // way into one, at whatever the Options music slider says. That slider has
+  // existed since 2013 with nothing behind it; this is what finally moves.
+  //
+  // It lives here rather than in SoundEngine because a track is two orders of
+  // magnitude longer than anything in data/sound, and that path decodes a whole
+  // file into memory to play it. An <audio> element streams instead, and the
+  // file is served next to index.html rather than preloaded into the .data
+  // package, so it costs nothing before the menu is up.
+  //
+  // No track shipped? Everything below quietly does nothing and the game is
+  // silent, which is how 0.6.1 always was.
+  // ---------------------------------------------------------------------------
+  (function () {
+    var TRACK = 'menu.m4a';
+
+    var el = null;
+    var wanted = false;   // what the game last asked for
+    var volume = 1;
+    var broken = false;   // no track, or the browser cannot decode it
+    var pending = false;  // asked to play, waiting on a user gesture
+
+    function clamp(v) { return Math.max(0, Math.min(1, v)); }
+
+    function element() {
+      if (el || broken) return el;
+      el = document.createElement('audio');
+      el.loop = true;
+      el.preload = 'none';
+      el.src = TRACK;
+      // A missing file is the normal case, not a failure worth reporting: give
+      // up on it for the session rather than retrying on every screen change.
+      el.addEventListener('error', function () { broken = true; el = null; });
+      return el;
+    }
+
+    // Browsers refuse audio until the page has been interacted with, and the
+    // game asks from its frame loop, which is never inside a gesture. So a
+    // refusal is expected rather than exceptional: park it and let the next real
+    // tap or keypress start the track.
+    function attempt() {
+      var a = element();
+      if (!a) return;
+      a.volume = clamp(volume);
+      var p = a.play();
+      if (p && p['catch']) p['catch'](function () { pending = true; });
+    }
+
+    function onGesture() {
+      if (!pending) return;
+      pending = false;
+      if (wanted) attempt();
+    }
+    ['pointerdown', 'touchend', 'keydown'].forEach(function (name) {
+      document.addEventListener(name, onGesture, true);
+    });
+
+    window.mcpeMusic = {
+      set: function (on, vol) {
+        volume = vol;
+        if (el && !broken) el.volume = clamp(vol);
+        if (on === wanted) return;
+        wanted = on;
+        if (on) {
+          attempt();
+        } else {
+          pending = false;
+          if (el) { el.pause(); el.currentTime = 0; }
+        }
+      }
+    };
+  })();
+  </script>
+
   {{{ SCRIPT }}}
 </body>
 </html>

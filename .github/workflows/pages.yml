@@ -40,7 +40,7 @@ jobs:
         run: cmake --build build -j"$(nproc)"
 
       # Pages serves index.html; everything else is fetched relative to it, so
-      # only these four files need to ship. The CMake scratch in build/ does not.
+      # only these files need to ship. The CMake scratch in build/ does not.
       - name: Assemble the site
         run: |
           mkdir -p site
@@ -48,6 +48,9 @@ jobs:
           cp handheld/project/web/build/minecraftpe.js   site/
           cp handheld/project/web/build/minecraftpe.wasm site/
           cp handheld/project/web/build/minecraftpe.data site/
+          # Menu music, only present once a track has been dropped into
+          # handheld/project/web/. Without it the page simply plays nothing.
+          cp handheld/project/web/build/menu.m4a site/ 2>/dev/null || true
           ls -lh site
 
       - uses: actions/upload-pages-artifact@v3

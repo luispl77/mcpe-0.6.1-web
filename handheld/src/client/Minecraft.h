@@ -62,6 +62,7 @@ public:
 	bool useTouchscreen();
 	void grabMouse();
 	void releaseMouse();
+	void updateMusic();
 
 	void handleBuildAction(BuildActionIntention*);
 
@@ -188,6 +189,11 @@ public:
 	MouseHandler mouseHandler;
 #endif
 	bool mouseGrabbed;
+
+	// What updateMusic() last told the page, so it only speaks on a change.
+	// The volume starts at an impossible value to force that first push.
+	bool _musicOn;
+	float _musicVolume;
 
     PixelCalc pixelCalc;
     PixelCalc pixelCalcUi;
