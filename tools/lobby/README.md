@@ -30,6 +30,45 @@ TLS, because a browser will not let an https page fetch http.
 | `GET /list` | `{players: [{id, name, world, age}]}` |
 | `POST /announce` | `{id, name, world}`, or `{id, gone: true}` on the way out |
 
+## What it costs
+
+Measured on node v22, RSS from `/proc`:
+
+| | RSS |
+|---|---|
+| idle | ~61 MB |
+| 200 players (the cap) | ~72 MB |
+| after 50,000 announces | ~86 MB, flat |
+
+The curve plateaus rather than climbing — 83 MB at 6k announces, 86 MB at 50k,
+decelerating throughout, with the board correctly pinned at 200. Almost none of
+that is the lobby: 200 entries is about 12 KB of strings, and `GET /list` at a
+full board is an 11.7 KB response. The rest is the Node runtime, so the figure
+is roughly what any Node process costs and barely moves with player count.
+
+## Behind a proxy
+
+`MCPE_LOBBY_TRUST_PROXY=1` makes it believe `X-Forwarded-For`. Leave it **off**
+unless something we control is in front, because the header is client-supplied
+and trusting it on a directly-reachable service lets anyone forge a source.
+
+The proxy must *overwrite* the header, not append to it:
+
+```nginx
+proxy_set_header X-Forwarded-For $remote_addr;   # not $proxy_add_x_forwarded_for
+```
+
+This matters more than it looks. The per-source cap counts players per IP, and
+behind a proxy every player arrives from the proxy's address — so with the cap
+at its original 4, the whole board would have held four players. It is 25 now,
+because a household, a school or a phone network is also one IP for everyone
+behind it. `MAX_PLAYERS` is what actually bounds memory; the per-source cap only
+stops one source owning the board.
+
+A full board evicts the stalest entry, but never one seen within half a TTL — so
+ghosts on their way out make room for a real player, while live players are not
+pushed off by a flood.
+
 ## Pointing the page at it
 
 `LOBBY_URL` at the top of the lobby block in `handheld/project/web/shell.html`.

@@ -33,9 +33,25 @@ const TTL_MS   = Number(process.env.MCPE_LOBBY_TTL || 35000);
 
 // Ceilings, not tuning. Anyone on the internet can reach this, so nothing here
 // is allowed to grow without one.
-const MAX_PLAYERS    = 200;   // whole board
-const MAX_PER_SOURCE = 4;     // one address announcing many fake players
+const MAX_PLAYERS    = 200;   // whole board; the one that bounds memory
 const MAX_BODY       = 1024;  // bytes of request body
+
+/* One address announcing a crowd of fake players. Generous on purpose: a source
+ * is an IP, and a household, a school or a phone network is one IP for everyone
+ * behind it. This was 4, which measured as 4 players per NAT and would have
+ * capped the whole board at 4 the moment it went behind a TLS proxy -- see
+ * TRUST_PROXY below. MAX_PLAYERS is what actually protects memory; this only
+ * stops one source owning the whole board. */
+const MAX_PER_SOURCE = 25;
+
+/* Whether X-Forwarded-For can be believed. Off by default because the header is
+ * client-supplied: trusting it on a directly-reachable service means anyone can
+ * forge a source and walk straight through MAX_PER_SOURCE.
+ *
+ * Turn it on only when this sits behind a proxy that *overwrites* the header --
+ * nginx `proxy_set_header X-Forwarded-For $remote_addr;`, not the $proxy_add_
+ * variant that appends, which would let a client prepend whatever it liked. */
+const TRUST_PROXY = process.env.MCPE_LOBBY_TRUST_PROXY === '1';
 
 const startedAt = Date.now();
 /** id -> {name, world, source, seen} */
@@ -58,12 +74,35 @@ function sweep() {
 		if (p.seen < cutoff) players.delete(id);
 }
 
+/* Makes room on a full board by dropping the stalest entry, but only one that
+ * has stopped heartbeating recently enough to be a ghost rather than a player.
+ *
+ * A flat refusal at MAX_PLAYERS meant a real player could be turned away by 200
+ * entries that were merely on their way out, which is the common case and it
+ * self-heals only after a full TTL. Refusing to evict anything fresher than
+ * half a TTL is what keeps this from becoming a rolling window that a flood
+ * could use to push live players off the board. Returns whether it freed a slot.
+ */
+function evictStalest() {
+	const staleBefore = Date.now() - TTL_MS / 2;
+	let oldestId = null;
+	let oldestSeen = Infinity;
+	for (const [id, p] of players)
+		if (p.seen < oldestSeen) { oldestSeen = p.seen; oldestId = id; }
+
+	if (oldestId === null || oldestSeen >= staleBefore) return false;
+	players.delete(oldestId);
+	return true;
+}
+
 function sourceOf(req) {
-	// Behind a reverse proxy the socket address is the proxy, so the per-source
-	// cap would be counting the proxy rather than the player. Trust the first
-	// XFF hop only because this sits behind our own front end.
-	const fwd = req.headers['x-forwarded-for'];
-	if (fwd) return String(fwd).split(',')[0].trim();
+	// Behind a reverse proxy every player arrives from the proxy's address, so
+	// the per-source cap would be counting the proxy rather than the player --
+	// but only a proxy we put there can be believed. See TRUST_PROXY.
+	if (TRUST_PROXY) {
+		const fwd = req.headers['x-forwarded-for'];
+		if (fwd) return String(fwd).split(',')[0].trim();
+	}
 	return (req.socket && req.socket.remoteAddress) || '?';
 }
 
@@ -167,7 +206,8 @@ const server = http.createServer((req, res) => {
 			const source = sourceOf(req);
 			const existing = players.get(id);
 			if (!existing) {
-				if (players.size >= MAX_PLAYERS) return send(res, 503, { error: 'full' });
+				if (players.size >= MAX_PLAYERS && !evictStalest())
+					return send(res, 503, { error: 'full' });
 				let fromSource = 0;
 				for (const p of players.values()) if (p.source === source) fromSource++;
 				if (fromSource >= MAX_PER_SOURCE) return send(res, 429, { error: 'too many from source' });
