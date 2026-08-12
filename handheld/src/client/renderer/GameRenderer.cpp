@@ -123,7 +123,13 @@ extern int _t_keepPic;
 /*public*/
 void GameRenderer::render(float a) {
 	TIMER_PUSH("mouse");
-	if (mc->player && mc->mouseGrabbed) {
+	// mouseGrabbed means a real cursor has been captured, which never happens on
+	// a touchscreen: grabMouse() returns early there instead of asking the
+	// browser for pointer lock. But this is the only place the turn input is
+	// ever polled, and on a touch build the turn input is the drag itself -- so
+	// gating on the grab alone left the d-pad and tap-to-place working, since
+	// those are ticked elsewhere, while the camera could not be moved at all.
+	if (mc->player && (mc->mouseGrabbed || mc->useTouchscreen())) {
         mc->mouseHandler.poll();
         //printf("Controller.x,y : %f,%f\n", Controller::getX(0), Controller::getY(0));
 
