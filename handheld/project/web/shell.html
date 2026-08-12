@@ -984,6 +984,131 @@
   })();
   </script>
 
+  <script>
+  // ---------------------------------------------------------------------------
+  // Join Game presence.
+  //
+  // 0.6.1 finds games with a UDP broadcast to 255.255.255.255, which a tab
+  // cannot send, so the Join card was always empty here. This announces "I am
+  // playing" while a world is open and asks who else is, against the small
+  // service in tools/lobby. WebLobbyRakNetInstance.cpp reads it back out.
+  //
+  // The endpoint lives in the page rather than the wasm for the same reason
+  // window.mcpeTouch does: it is a property of where this is deployed, not of
+  // the build, and it can be changed without a three-minute CI round trip.
+  //
+  // LOBBY_URL empty is the off switch, and off is a supported state -- every
+  // path below degrades to an empty list, which is exactly what an empty LAN
+  // looked like before any of this existed. Killing the service does the same
+  // thing without touching the page. ?lobby=<url> points a build at a local one.
+  // ---------------------------------------------------------------------------
+  (function () {
+    var LOBBY_URL = '';
+
+    var url = new URLSearchParams(location.search).get('lobby');
+    if (url === null) url = LOBBY_URL;
+    url = (url || '').replace(/\/+$/, '');
+
+    // Stable for the life of the tab, and per tab rather than per browser: two
+    // windows are two players. sessionStorage so a reload keeps its place in
+    // the list instead of leaving a ghost behind for a TTL.
+    var id = sessionStorage.getItem('mcpeLobbyId');
+    if (!id) {
+      id = Math.random().toString(36).slice(2) + Date.now().toString(36);
+      sessionStorage.setItem('mcpeLobbyId', id);
+    }
+
+    var HEARTBEAT_MS = 10000;
+    var POLL_MS = 3000;
+
+    var name = '', world = '';
+    var beat = null, poll = null;
+    var others = [];
+
+    // The game keys its list by address and matches selection on it, so each
+    // player needs a distinct stable number. FNV-1a over the lobby id, which
+    // stays put as players come and go -- an index would not.
+    function key(text) {
+      var h = 2166136261;
+      for (var i = 0; i < text.length; i++) {
+        h ^= text.charCodeAt(i);
+        h = (h * 16777619) >>> 0;
+      }
+      return h >>> 0;
+    }
+
+    function post(body) {
+      if (!url) return;
+      // keepalive so the "gone" on the way out still goes when the tab is
+      // closing and the page is being torn down around it.
+      fetch(url + '/announce', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        keepalive: true
+      }).catch(function () {});
+    }
+
+    function beatOnce() { post({ id: id, name: name, world: world }); }
+
+    function refresh() {
+      if (!url) { others = []; return; }
+      fetch(url + '/list', { cache: 'no-store' })
+        .then(function (r) { return r.ok ? r.json() : { players: [] }; })
+        .then(function (data) {
+          others = (data.players || []).filter(function (p) { return p.id !== id; });
+        })
+        // A lobby that is down is a lobby with nobody in it. Clearing rather
+        // than keeping the last answer is what makes stopping the service look
+        // like an ordinary quiet night instead of a frozen list.
+        .catch(function () { others = []; });
+    }
+
+    window.addEventListener('pagehide', function () {
+      if (beat) post({ id: id, gone: true });
+    });
+
+    window.mcpeLobby = {
+      announce: function (playerName, worldName) {
+        name = playerName || 'Player';
+        if (worldName) world = worldName;
+        if (beat) clearInterval(beat);
+        beatOnce();
+        beat = setInterval(beatOnce, HEARTBEAT_MS);
+      },
+
+      setWorld: function (worldName) {
+        world = worldName || '';
+        if (beat) beatOnce();
+      },
+
+      leave: function () {
+        if (beat) { clearInterval(beat); beat = null; }
+        post({ id: id, gone: true });
+        world = '';
+      },
+
+      startListing: function () {
+        if (poll) return;
+        refresh();
+        poll = setInterval(refresh, POLL_MS);
+      },
+
+      stopListing: function () {
+        if (poll) { clearInterval(poll); poll = null; }
+        others = [];
+      },
+
+      // Flat records rather than JSON: the reader is C++03 with no parser in it.
+      records: function () {
+        return others.map(function (p) {
+          return (p.name || '') + '\t' + (p.world || '') + '\t' + key(p.id);
+        }).join('\n');
+      }
+    };
+  })();
+  </script>
+
   {{{ SCRIPT }}}
 </body>
 </html>

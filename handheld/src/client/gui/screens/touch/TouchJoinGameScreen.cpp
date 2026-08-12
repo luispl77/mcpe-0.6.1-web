@@ -48,8 +48,17 @@ void AvailableGamesList::renderItem( int i, int x, int y, int h, Tesselator& t )
 		blit(xx2, y + 6, 0, 0, 37, 8, 140, 240);
 	}
 
+#if defined(MC_WASM)
+	// The second line is the host's LAN address, and on the web there isn't
+	// one: entries come from the lobby, and their address is a number derived
+	// from the player's id purely so the list has something to key on. Printing
+	// it would be printing a fake IP. The name line carries the world instead.
+	(void)color2;
+	drawString(minecraft->font, s.name.C_String(), xx1, y + 8, color);
+#else
 	drawString(minecraft->font, s.name.C_String(), xx1, y + 4 + 2, color);
 	drawString(minecraft->font, s.address.ToString(false), xx2, y + 18, color2);
+#endif
 
 	/*
 	drawString(minecraft->font, copiedServerList[i].name.C_String(), (int)x0 + 24, y + 4, color);
@@ -214,7 +223,14 @@ void JoinGameScreen::render( int xm, int ym, float a )
 	const int baseX = bHeader.x + bHeader.width / 2;
 
 	if (hasNetwork) {
+#if defined(MC_WASM)
+		// Nothing is being scanned for: there is no LAN to broadcast on, and the
+		// list is polled from the lobby service. The spinner still earns its
+		// place -- it is the only sign the poll is alive when nobody is on.
+		std::string s = "Looking for players...";
+#else
 		std::string s = "Scanning for WiFi Games...";
+#endif
 		drawCenteredString(minecraft->font, s, baseX, 8, 0xffffffff);
 
 		const int textWidth = minecraft->font->width(s);
