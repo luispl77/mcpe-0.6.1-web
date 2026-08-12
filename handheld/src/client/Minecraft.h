@@ -99,6 +99,27 @@ public:
 
 	void prepareLevel(const std::string& message);
 
+	/** prepareLevel, in three parts, so the web can run it across frames.
+
+	    Every other platform generates on a thread while the main loop keeps
+	    drawing ProgressScreen, which is where the loading bar comes from. There
+	    are no threads in a browser, so prepareLevel ran inline and blocked the
+	    one thread the page has: nothing painted, and a world load looked like
+	    the menu freezing.
+
+	    Nothing here is a new state for the game. isGeneratingLevel is already a
+	    supported condition with the level half-built and the main loop running
+	    -- it is exactly what the threaded platforms sit in -- so the web now
+	    drives that same state cooperatively instead of from a thread.
+
+	    prepareLevel() itself still calls all three back to back, so every other
+	    platform runs the identical sequence it always did. */
+	void prepareLevelBegin();
+	/// Runs at most maxIterations of the chunk pass, or all of them when
+	/// maxIterations <= 0. Returns true once the pass is finished.
+	bool prepareLevelChunkStep(int maxIterations);
+	void prepareLevelFinish();
+
 	void leaveGame(bool renameLevel = false);
 
 	int getProgressStatusId();
@@ -210,6 +231,11 @@ protected:
     // @note @attn @warn: this is dangerous as fuck!
 	volatile bool isGeneratingLevel;
 	bool _hasSignaledGeneratingLevelFinished;
+
+	/// How far the chunk pass has got, so it can be resumed next frame.
+	int _prepChunkIndex;
+	/// Set while the web is driving prepareLevel a slice at a time.
+	bool _prepInProgress;
 
 	LevelStorageSource* storageSource;
 	bool _running;

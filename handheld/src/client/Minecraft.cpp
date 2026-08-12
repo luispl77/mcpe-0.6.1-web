@@ -178,6 +178,8 @@ Minecraft::Minecraft()
 	ticks(0),
 	isGeneratingLevel(false),
 	_hasSignaledGeneratingLevelFinished(true),
+	_prepChunkIndex(0),
+	_prepInProgress(false),
 	generateLevelThread(NULL),
 	progressStagePercentage(0),
 	progressStageStatusId(0),
@@ -327,8 +329,18 @@ void Minecraft::setLevel(Level* level, const std::string& message /* ="" */, Loc
 			isGeneratingLevel = true;
 			generateLevelThread = new CThread(Minecraft::prepareLevel_tspawn, this);
 		} else {
+#if defined(MC_WASM)
+			// Same lock, driven from update() a slice at a time instead of by a
+			// thread, so the frame in between paints ProgressScreen and the bar
+			// moves. Running it here would block the page's only thread for the
+			// whole generation and nothing would be drawn at all.
+			isGeneratingLevel = true;
+			_prepInProgress = true;
+			prepareLevelBegin();
+#else
 			// Non-threaded
 			generateLevel("Currently not used", level);
+#endif
 		}
     } else {
         player = NULL;
@@ -384,38 +396,61 @@ void Minecraft::leaveGame(bool renameLevel /*=false*/)
 }
 
 void Minecraft::prepareLevel(const std::string& title) {
+	// Straight through, exactly as this always ran. Only the web splits it up;
+	// see prepareLevelChunkStep and the note in Minecraft.h.
+	prepareLevelBegin();
+	prepareLevelChunkStep(-1);
+	prepareLevelFinish();
+}
+
+void Minecraft::prepareLevelBegin() {
 	LOGI("status: 1\n");
 	progressStageStatusId = 1;
-
-	Stopwatch A, B, C, D;
-	A.start();
-
-	Stopwatch L;
+	progressStagePercentage = 0;
 
 	// Dont update lights if we load the level (ok, actually just with leveldata version=1.+(?))
 	if (!level->isNew())
 		level->setUpdateLights(false);
 
-	int Max = CHUNK_CACHE_WIDTH * CHUNK_CACHE_WIDTH;
-	int pp = 0;
-	for (int x = 8; x < (CHUNK_CACHE_WIDTH * CHUNK_WIDTH); x += CHUNK_WIDTH) {
-        for (int z = 8; z < (CHUNK_CACHE_WIDTH * CHUNK_WIDTH); z += CHUNK_WIDTH) {
-            progressStagePercentage = 100 * pp++ / Max;
-            //printf("level generation progress %d\n", progressStagePercentage);
-			B.start();
-            level->getTile(x, 64, z);
-			B.stop();
-			L.start();
-			if (level->isNew())
-				while (level->updateLights())
-					;
-			L.stop();
-        }
-    }
-	A.stop();
+	_prepChunkIndex = 0;
+}
+
+/** The expensive pass: one getTile per chunk column, which is what actually
+    generates the world, plus the light settling behind it.
+
+    It was two nested loops over x and z. They are folded into one index so the
+    pass can stop between any two chunks and pick up next frame -- the whole
+    point of the split. The arithmetic below reproduces the original bounds:
+    both loops ran from 8 to CHUNK_CACHE_WIDTH * CHUNK_WIDTH stepping a chunk,
+    which is CHUNK_CACHE_WIDTH steps each, so the index divides and remainders
+    straight back into them. */
+bool Minecraft::prepareLevelChunkStep(int maxIterations) {
+	const int Max = CHUNK_CACHE_WIDTH * CHUNK_CACHE_WIDTH;
+	int done = 0;
+
+	while (_prepChunkIndex < Max) {
+		if (maxIterations > 0 && done >= maxIterations)
+			return false;
+
+		const int x = 8 + (_prepChunkIndex / CHUNK_CACHE_WIDTH) * CHUNK_WIDTH;
+		const int z = 8 + (_prepChunkIndex % CHUNK_CACHE_WIDTH) * CHUNK_WIDTH;
+
+		progressStagePercentage = 100 * _prepChunkIndex / Max;
+		++_prepChunkIndex;
+		++done;
+
+		level->getTile(x, 64, z);
+		if (level->isNew())
+			while (level->updateLights())
+				;
+	}
+
+	return true;
+}
+
+void Minecraft::prepareLevelFinish() {
 	level->setUpdateLights(true);
 
-	C.start();
 	for (int x = 0; x < CHUNK_CACHE_WIDTH; x++)
 	{
 		for (int z = 0; z < CHUNK_CACHE_WIDTH; z++)
@@ -428,7 +463,6 @@ void Minecraft::prepareLevel(const std::string& title) {
 			}
 		}
 	}
-	C.stop();
 
 	LOGI("status: 3\n");
 	progressStageStatusId = 3;
@@ -446,15 +480,11 @@ void Minecraft::prepareLevel(const std::string& title) {
 	progressStageStatusId = 2;
 	LOGI("status: 2\n");
 
-	D.start();
 	level->prepare();
-	D.stop();
 
-	A.print("Generate level: ");
-	L.print(" - light: ");
-	B.print(" - getTl: ");
-	C.print(" - clear: ");
-	D.print(" - prepr: ");
+	// The per-phase Stopwatch prints went with the split -- they straddled the
+	// three functions and cannot span frames. generateLevel still times and
+	// prints the whole thing, which is the number that was ever read anyway.
 	progressStageStatusId = 0;
 }
 
@@ -564,6 +594,24 @@ void Minecraft::tick(int nTick, int maxTick) {
 	// ready, _levelGenerated() is called once and any threads are deleted.
 	//
 	if (isGeneratingLevel) {
+#if defined(MC_WASM)
+		/* Deliberately here, below this frame's render up at gameRenderer->render:
+		   the slice runs after ProgressScreen has been drawn with the percentage
+		   the last slice left behind, so each frame shows the bar one step
+		   further along.
+
+		   Four chunk columns a frame. The pass is CHUNK_CACHE_WIDTH squared =
+		   256 of them, so a world lands in about sixty frames -- near enough the
+		   time it took when it blocked, with the difference that the page is
+		   drawing throughout instead of frozen. */
+		if (_prepInProgress && prepareLevelChunkStep(4)) {
+			prepareLevelFinish();
+			_prepInProgress = false;
+			// What generateLevel() does at the end of the blocking path; the
+			// next update() picks it up and calls _levelGenerated().
+			isGeneratingLevel = false;
+		}
+#endif
 		return;
 	} else if (!_hasSignaledGeneratingLevelFinished) {
 		if (generateLevelThread) {
