@@ -27,10 +27,6 @@ EM_JS(char*, mcpe_prompt, (const char* message, const char* initial), {
 	return buf;
 });
 
-EM_JS(int, mcpe_confirm, (const char* message), {
-	return window.confirm(UTF8ToString(message)) ? 1 : 0;
-});
-
 /// Wraps mcpe_prompt so the malloc'd result can't leak past the copy.
 static bool promptString(const char* message, const char* initial, std::string& out)
 {
@@ -61,13 +57,16 @@ void AppPlatform_sdl::showDialog(int dialogId)
 			return;
 		}
 
-		const bool creative = mcpe_confirm("Creative mode?\n\nOK = creative, Cancel = survival") != 0;
-
-		// SelectWorldScreen::tick() reads these back positionally as
-		// name / seed / gamemode, so the order and count here are load bearing.
+		// No game mode here. Every other platform's dialog is a native sheet
+		// that can hold a picker alongside the text fields; a browser's is one
+		// question at a time, and asking "Creative mode? OK / Cancel" is a worse
+		// version of a screen the game already has. Touch::SelectWorldScreen
+		// hands off to SimpleChooseLevelScreen for it instead.
+		//
+		// SelectWorldScreen::tick() reads these back positionally, so the order
+		// and count here are load bearing.
 		_userInput.push_back(name);
 		_userInput.push_back(seed);
-		_userInput.push_back(creative ? "creative" : "survival");
 		break;
 	}
 

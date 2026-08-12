@@ -11,6 +11,20 @@ SimpleChooseLevelScreen::SimpleChooseLevelScreen(const std::string& levelName)
 	bSurvival(0),
 	bBack(0),
 	levelName(levelName),
+	seed(0),
+	hasDetails(false),
+	hasChosen(false)
+{
+}
+
+SimpleChooseLevelScreen::SimpleChooseLevelScreen(const std::string& levelId, const std::string& levelName, int seed)
+:	bCreative(0),
+	bSurvival(0),
+	bBack(0),
+	levelName(levelName),
+	levelId(levelId),
+	seed(seed),
+	hasDetails(true),
 	hasChosen(false)
 {
 }
@@ -74,7 +88,7 @@ void SimpleChooseLevelScreen::buttonClicked( Button* button )
 	if (hasChosen)
 		return;
 
-	int gameType;
+	int gameType = GameType::Survival;
 
 	if (button == bCreative)
 		gameType = GameType::Creative;
@@ -82,9 +96,14 @@ void SimpleChooseLevelScreen::buttonClicked( Button* button )
 	if (button == bSurvival)
 		gameType = GameType::Survival;
 
-	std::string levelId = getUniqueLevelName(levelName);
-	LevelSettings settings(getEpochTimeS(), gameType);
-	minecraft->selectLevel(levelId, levelId, settings);
+	// Built from a name alone, the id is derived here and the seed is the clock.
+	// Given the full set, the caller has already made the id legal and parsed a
+	// seed the player typed, and the display name is kept as they wrote it.
+	const std::string id   = hasDetails ? levelId : getUniqueLevelName(levelName);
+	const std::string name = hasDetails ? levelName : id;
+
+	LevelSettings settings(hasDetails ? seed : getEpochTimeS(), gameType);
+	minecraft->selectLevel(id, name, settings);
 	minecraft->hostMultiplayer();
 	minecraft->setScreen(new ProgressScreen());
 	hasChosen = true;

@@ -1,6 +1,7 @@
 #include "TouchSelectWorldScreen.h"
 #include "../StartMenuScreen.h"
 #include "../ProgressScreen.h"
+#include "../SimpleChooseLevelScreen.h"
 #include "../DialogDefinitions.h"
 #include "../../components/ImageButton.h" //weird!
 #include "../../../renderer/Textures.h"
@@ -438,6 +439,23 @@ void SelectWorldScreen::tick()
 							}
 						}
 					}
+#if defined(MC_WASM)
+					// The mode is not the dialog's business. Android and iOS put
+					// it there because their dialog was a native multi-field
+					// sheet; a browser has no such thing, and squeezing it into a
+					// second popup with OK and Cancel for two game modes is worse
+					// than what the game already ships -- SimpleChooseLevelScreen
+					// is a real screen with two labelled buttons, and the Windows
+					// build has always used it. Hand off to it with the name and
+					// seed already collected.
+					LOGI("Choosing a mode for level id '%s', name '%s', seed '%d'\n", levelId.c_str(), levelName.c_str(), seed);
+					_state = _STATE_DEFAULT;
+					worldsList->hasPickedLevel = false;
+					worldsList->pickedIndex = -1;
+					// Deletes this screen, so nothing may touch it afterwards.
+					minecraft->setScreen(new SimpleChooseLevelScreen(levelId, levelName, seed));
+					return;
+#else
 					// Read the game mode
 					bool isCreative = true;
 					if (sv.size() >= 3 && sv[2] == "survival")
@@ -450,6 +468,7 @@ void SelectWorldScreen::tick()
 					minecraft->hostMultiplayer();
 					minecraft->setScreen(new ProgressScreen());
 					_hasStartedLevel = true;
+#endif
 				}
 				_state = _STATE_DEFAULT;
 				// Reset the world list
