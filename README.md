@@ -33,6 +33,7 @@ platform seams around it.
 | Worldgen, save, reload | ✅ |
 | 60 fps | ✅ |
 | Keyboard + mouse, pointer lock | ✅ |
+| Phones and tablets — touch controls | ✅ |
 | Sound effects | ✅ |
 | Fullscreen | ✅ |
 | Options that persist | ✅ |
@@ -44,6 +45,20 @@ browsers have none. It's disabled rather than half-working.
 
 **Music** was streamed from assets that aren't in the compiled-in PCM sound
 bank, so there's nothing to play. Sound effects are all present.
+
+## On a phone or tablet
+
+The page works out which controls to build before the game starts: a coarse
+primary pointer with no hover gets the game's **original touch UI** — the
+on-screen d-pad, drag to look, tap to place, the pause button in the top right —
+and anything else gets keyboard and mouse. Add `?touch=1` or `?touch=0` to the
+URL to force it either way.
+
+On touch the canvas fills the screen and everything else moves behind one tap:
+**Play fullscreen** asks for fullscreen, locks the orientation to landscape, and
+starts the game. The ☰ button in the top-left corner brings that screen back for
+the save buttons. An iPhone has no element fullscreen — only `<video>` gets it —
+so the request is refused there and the layout is built so that costs nothing.
 
 ## Controls
 

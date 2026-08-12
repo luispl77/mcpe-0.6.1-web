@@ -179,8 +179,16 @@ std::string AppPlatform_sdl::getPlatformStringVar(int stringId)
 
 float AppPlatform_sdl::getPixelsPerMillimeter()
 {
-	// Roughly a 27" desktop display; only used to size touch targets, which
-	// this build doesn't show anyway.
+	// This sizes the touch targets -- the d-pad keys, the pause button, the
+	// dig-feedback ring -- so it only matters when there are any.
+	if (_touchscreen) {
+		// The canvas is measured in CSS pixels, and on a phone or tablet a CSS
+		// pixel is Android's `dp`: 1/160 inch by definition, which is the
+		// density this UI was laid out against in the first place.
+		return 160 / 25.4f;
+	}
+
+	// Roughly a 27" desktop display.
 	const int w = 2560;
 	const int h = 1440;
 	const float pixels = Mth::sqrt((float)(w * w + h * h));

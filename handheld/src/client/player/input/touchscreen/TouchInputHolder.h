@@ -89,6 +89,13 @@ public:
 	}
 
 	virtual void onConfigChanged(const Config& c) {
+		// Split controls -- looking around confined to a pad in the bottom
+		// right corner -- would be a good fit for a phone, and Options has had
+		// a flag for it since 2013. Mojang disabled it with this literal
+		// `false &&` and it has never run since. Turning it back on gets you
+		// the crosshair and the six-slot hotbar that go with the mode, but the
+		// pad itself neither draws nor turns the camera, so it stays off until
+		// someone finishes it.
 		if (false && _options->isJoyTouchArea) {
 			int touchWidth = c.width - (int)inventoryArea._x1;
 			if (touchWidth > (int)c.minecraft->pixelCalc.millimetersToPixels(60))
@@ -129,9 +136,9 @@ public:
 			_area.include(&screenArea);
 			_area.exclude(&moveArea);
 			_area.exclude(&inventoryArea);
-#ifdef __APPLE__
+#ifdef MC_TOUCH_PAUSE_BUTTON
             _area.exclude(&pauseArea);
-#endif /*__APPLE__*/
+#endif /*MC_TOUCH_PAUSE_BUTTON*/
 			//LOGI("Movearea: %f %f %f% f\n", moveArea._x0, moveArea._x1, moveArea._y0, moveArea._y1);
 
 			_model.clear();
@@ -426,7 +433,7 @@ public:
 	virtual void onConfigChanged(const Config& c) {
 		_move.onConfigChanged(c);
 		_turnBuild.moveArea = _move.getRectangleArea();
-#ifdef __APPLE__
+#ifdef MC_TOUCH_PAUSE_BUTTON
 		_turnBuild.pauseArea = _move.getPauseRectangleArea();
 #endif
 		_turnBuild.inventoryArea = _mc->gui.getRectangleArea( _mc->options.isLeftHanded? 1 : -1 );

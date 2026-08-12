@@ -13,6 +13,16 @@ class Player;
 class Minecraft;
 class PolygonArea;
 
+/** Whether the d-pad also draws an on-screen pause button.
+
+    Android doesn't need one -- it has a hardware back button, which is where
+    handleBack() goes. iOS has no such thing, so this was written for it. A
+    browser tab has neither, and on a phone it has no Escape key either, so
+    without this there is no way out of the game and back to the menu. */
+#if defined(__APPLE__) || defined(MC_WASM)
+	#define MC_TOUCH_PAUSE_BUTTON 1
+#endif
+
 // @todo: extract a separate MoveInput (-> merge XperiaPlayInput)
 class TouchscreenInput_TestFps:	public IMoveInput,
 								public GuiComponent

@@ -1148,6 +1148,14 @@ void Minecraft::grabMouse()
 {
 #ifndef STANDALONE_SERVER
 	if (mouseGrabbed) return;
+
+	// There is no cursor to capture on a touchscreen: looking around is the
+	// drag itself, and the input holder reads the raw pointers. This is the one
+	// gate that matters, because setScreen(NULL) grabs on the way out of every
+	// menu -- and on the web a grab means asking the browser for pointer lock,
+	// which a phone would either refuse or, worse, honour.
+	if (useTouchscreen()) return;
+
 	mouseGrabbed = true;
 	mouseHandler.grab();
 	//setScreen(NULL);
@@ -1241,6 +1249,17 @@ void Minecraft::setSize(int w, int h) {
 		Gui::GuiScale = 2.0f;
 	else
 		Gui::GuiScale = 1.0f;
+
+	// The ladder above reads width alone, which stood in fine for screen size
+	// when every device this shipped on was 16:9 or squarer. A phone held
+	// sideways today is 2.2:1 or wider, so an 863x360 viewport picks the scale
+	// meant for a desktop window and the pause menu's last button lands below
+	// the bottom of the screen. Step back down until the tallest screen fits:
+	// PauseScreen puts its third button at y=112 in GUI units and it is about
+	// 24 tall, so nothing may be laid out in less than 140 of them.
+	const float MinGuiHeight = 140.0f;
+	while (Gui::GuiScale > 1.0f && (float)height < MinGuiHeight * Gui::GuiScale)
+		Gui::GuiScale -= 1.0f;
 
 	Gui::InvGuiScale = 1.0f / Gui::GuiScale;
 	int screenWidth  = (int)(width  * Gui::InvGuiScale);

@@ -2,8 +2,35 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- user-scalable=no and maximum-scale together are what stop a double-tap or a
+     two-finger pinch from zooming the page: both are gestures the game wants for
+     itself. viewport-fit=cover puts the canvas under the notch rather than
+     letterboxed beside it. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#1a1a1a">
 <title>Minecraft Pocket Edition 0.6.1</title>
+
+<script>
+  // Which controls the game builds, decided before anything else on the page so
+  // that the layout and the game agree. main_sdl.h reads this back out.
+  //
+  // (pointer: coarse) is about the *primary* pointer, so a laptop with a
+  // touchscreen and a trackpad still says fine; pairing it with (hover: none)
+  // keeps a stylus tablet from being mistaken for a phone. ?touch=1 / ?touch=0
+  // forces it either way, which is how the touch build gets tested on a desktop.
+  (function () {
+    var forced = new URLSearchParams(location.search).get('touch');
+    window.mcpeTouch = forced !== null
+      ? (forced === '1' || forced === 'true')
+      : (window.matchMedia('(pointer: coarse)').matches &&
+         window.matchMedia('(hover: none)').matches);
+    document.documentElement.className = window.mcpeTouch ? 'touch' : 'pointer';
+  })();
+</script>
+
 <style>
   html, body {
     margin: 0;
@@ -43,7 +70,7 @@
   #hint { font-size: 12px; color: #888; text-align: center; line-height: 1.6; }
   #hint kbd { background: #333; border-radius: 3px; padding: 1px 5px; color: #ccc; }
   #saves { display: flex; gap: 8px; align-items: center; }
-  #saves button {
+  button {
     font: inherit;
     font-size: 12px;
     color: #ddd;
@@ -53,9 +80,98 @@
     padding: 5px 12px;
     cursor: pointer;
   }
-  #saves button:hover:not(:disabled) { background: #3d3d3d; }
-  #saves button:disabled { opacity: 0.4; cursor: default; }
+  button:hover:not(:disabled) { background: #3d3d3d; }
+  button:disabled { opacity: 0.4; cursor: default; }
   #saveMsg { font-size: 12px; color: #7a9; min-height: 1.2em; }
+
+  /* The launch overlay and the exit button belong to the touch layout only. */
+  #launch, #exit { display: none; }
+
+  /* ---------------------------------------------------------------------
+     Touch layout.
+
+     A phone has one useful piece of screen and the game should have all of
+     it, so the canvas is pinned to the viewport rather than laid out in the
+     flow, and everything else moves into the launch overlay on top of it.
+     --------------------------------------------------------------------- */
+  html.touch, html.touch body {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    /* No rubber-banding, no pull-to-refresh, no text selection, no callout
+       menu on a long press -- every one of those is a gesture the game means
+       to use for digging. */
+    overscroll-behavior: none;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  html.touch #wrap { gap: 0; }
+  html.touch #hint { display: none; }
+  html.touch canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+  }
+  html.touch #status {
+    position: absolute;
+    bottom: 12px;
+    width: 100%;
+    text-align: center;
+    pointer-events: none;
+  }
+
+  html.touch #launch {
+    display: flex;
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 14px;
+    /* Under the notch, but not under the text. */
+    padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right))
+             max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+    box-sizing: border-box;
+    background: #1a1a1a;
+    overflow-y: auto;
+    touch-action: pan-y;
+    z-index: 10;
+  }
+  html.touch #launch.hidden { display: none; }
+  #launchTitle { font-size: 15px; letter-spacing: 0.06em; text-align: center; }
+  #launchTitle small { display: block; margin-top: 4px; color: #888; font-size: 12px; letter-spacing: 0; }
+  #playBtn {
+    font-size: 17px;
+    padding: 14px 34px;
+    background: #3b6b3b;
+    border-color: #4e8a4e;
+    color: #eaffea;
+    border-radius: 6px;
+  }
+  #playBtn:disabled { background: #333; border-color: #4a4a4a; color: #999; }
+  #rotateHint { font-size: 12px; color: #c9a227; min-height: 1.2em; text-align: center; }
+
+  /* Small, dim, and in the one corner the game draws nothing in -- the pause
+     button is top-right, the d-pad bottom-left, the hotbar along the bottom. */
+  html.touch #exit {
+    display: block;
+    position: absolute;
+    top: max(6px, env(safe-area-inset-top));
+    left: max(6px, env(safe-area-inset-left));
+    width: 34px;
+    height: 34px;
+    padding: 0;
+    font-size: 15px;
+    line-height: 34px;
+    border-radius: 17px;
+    background: rgba(0, 0, 0, 0.35);
+    border-color: rgba(255, 255, 255, 0.25);
+    color: rgba(255, 255, 255, 0.65);
+    z-index: 5;
+  }
+  html.touch #exit.hidden { display: none; }
 </style>
 </head>
 <body>
@@ -84,6 +200,19 @@
       <input id="importFile" type="file" accept=".zip,application/zip" hidden>
     </div>
     <div id="saveMsg">Worlds live in this browser's storage — download them to keep a copy.</div>
+
+    <!-- Touch only. Populated with the save buttons at startup so there is one
+         set of them rather than two that can disagree. -->
+    <div id="launch">
+      <div id="launchTitle">
+        MINECRAFT POCKET EDITION
+        <small>v0.6.1 alpha</small>
+      </div>
+      <button id="playBtn" disabled>Loading…</button>
+      <div id="rotateHint"></div>
+    </div>
+
+    <button id="exit" class="hidden" title="Menu" aria-label="Menu">☰</button>
   </div>
 
   <script>
@@ -101,7 +230,10 @@
         statusEl.textContent = '';
         document.getElementById('exportBtn').disabled = false;
         document.getElementById('importBtn').disabled = false;
+        // Nothing may call into the wasm before this point; see mcpeReady.
+        window.mcpeReady = true;
         fitCanvas();
+        if (window.mcpeOnReady) window.mcpeOnReady();
       }
     };
 
@@ -121,6 +253,7 @@
   (function () {
     var wrap = document.getElementById('wrap');
     var canvas = document.getElementById('canvas');
+    var touch = window.mcpeTouch;
 
     // Rendering is done at CSS pixel size rather than device pixels. It keeps
     // pointer coordinates a straight 1:1 with the canvas (no scaling factor to
@@ -129,14 +262,42 @@
     // art drawn at 16x16. The cap keeps a large monitor from doing the same.
     var MAX_W = 1920, MAX_H = 1080;
 
-    function fitCanvas() {
-      if (!window.Module || !Module._mcpe_resize) return;
+    // The window's inner size is wrong on a phone for most of the first second:
+    // it counts the URL bar that is about to slide away. visualViewport is what
+    // actually has the room the page can draw in.
+    function viewport() {
+      var vv = window.visualViewport;
+      return {
+        w: Math.floor(vv ? vv.width : window.innerWidth),
+        h: Math.floor(vv ? vv.height : window.innerHeight)
+      };
+    }
 
-      var full = document.fullscreenElement != null;
-      // Leave room for the two hint lines and the buttons when not fullscreen.
-      var chromeH = full ? 0 : 136;
-      var w = Math.max(320, Math.min(MAX_W, Math.floor(window.innerWidth) - (full ? 0 : 16)));
-      var h = Math.max(240, Math.min(MAX_H, Math.floor(window.innerHeight) - chromeH));
+    function fitCanvas() {
+      // Exported wasm functions exist as stubs from the first line of script,
+      // and calling one before the runtime is up aborts the whole module. A
+      // phone fires a resize while the URL bar settles, which is early enough
+      // to hit exactly that -- so this waits for onRuntimeInitialized rather
+      // than for the symbol to be present.
+      if (!window.mcpeReady || !window.Module || !Module._mcpe_resize) return;
+
+      var view = viewport();
+      var w, h;
+
+      if (touch) {
+        // Every pixel goes to the game; the controls are drawn inside it.
+        w = Math.min(MAX_W, view.w);
+        h = Math.min(MAX_H, view.h);
+      } else {
+        var full = document.fullscreenElement != null;
+        // Leave room for the two hint lines and the buttons when not fullscreen.
+        var chromeH = full ? 0 : 136;
+        w = Math.min(MAX_W, view.w - (full ? 0 : 16));
+        h = Math.min(MAX_H, view.h - chromeH);
+      }
+
+      w = Math.max(320, w);
+      h = Math.max(240, h);
 
       if (canvas.width === w && canvas.height === h) return;
 
@@ -155,17 +316,74 @@
     }
 
     window.addEventListener('resize', scheduleFit);
+    window.addEventListener('orientationchange', scheduleFit);
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', scheduleFit);
+    }
     document.addEventListener('fullscreenchange', function () {
       // Fullscreen transitions animate; re-fit once the new size has settled.
       fitCanvas();
       scheduleFit();
     });
 
+    // --- fullscreen ----------------------------------------------------------
+
+    function isFullscreen() {
+      return document.fullscreenElement != null || document.webkitFullscreenElement != null;
+    }
+
+    // Resolves whether or not it worked. An iPhone has no element fullscreen at
+    // all -- only <video> gets it -- so this legitimately fails there, and the
+    // touch layout is built so that failing costs nothing: the canvas already
+    // fills the viewport, and Safari's own chrome slides away on its own.
+    function requestFullscreen() {
+      var el = document.documentElement;
+      try {
+        if (el.requestFullscreen) return el.requestFullscreen({ navigationUI: 'hide' });
+        if (el.webkitRequestFullscreen) { el.webkitRequestFullscreen(); return Promise.resolve(); }
+      } catch (e) { /* fall through */ }
+      return Promise.reject(new Error('no element fullscreen'));
+    }
+
+    function exitFullscreen() {
+      try {
+        if (document.exitFullscreen) return document.exitFullscreen();
+        if (document.webkitExitFullscreen) { document.webkitExitFullscreen(); return Promise.resolve(); }
+      } catch (e) { /* fall through */ }
+      return Promise.resolve();
+    }
+
+    // The game is a landscape game: the hotbar runs along the bottom and the
+    // d-pad sits beside it, which in portrait leaves almost no world visible.
+    // Only allowed while fullscreen, and only on Android -- iOS has no
+    // orientation lock, which is why the overlay also asks in words.
+    function lockLandscape() {
+      try {
+        if (screen.orientation && screen.orientation.lock)
+          return screen.orientation.lock('landscape').catch(function () {});
+      } catch (e) { /* not supported */ }
+      return Promise.resolve();
+    }
+
+    function unlockOrientation() {
+      try {
+        if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock();
+      } catch (e) { /* not supported */ }
+    }
+
+    window.mcpeFullscreen = {
+      is: isFullscreen,
+      enter: function () { return requestFullscreen().then(lockLandscape, lockLandscape); },
+      exit: function () { unlockOrientation(); return exitFullscreen(); }
+    };
+
     document.getElementById('fullscreenBtn').addEventListener('click', function () {
-      if (document.fullscreenElement) document.exitFullscreen();
-      else wrap.requestFullscreen().catch(function () { /* user said no */ });
+      if (isFullscreen()) window.mcpeFullscreen.exit();
+      else window.mcpeFullscreen.enter();
       canvas.focus();
     });
+
+    // --- pointer lock (desktop only) ----------------------------------------
 
     // MouseHandler::grab() sets window.mcpeWantPointerLock but cannot ask for
     // the lock itself -- the browser only grants it from inside a user gesture,
@@ -182,8 +400,92 @@
     // lock and the keypress never reaches the page. Tell the game so it stops
     // believing it still holds the cursor.
     document.addEventListener('pointerlockchange', function () {
-      if (!document.pointerLockElement && window.Module && Module._mcpe_pointerlock_lost)
+      if (!document.pointerLockElement && window.mcpeReady && window.Module && Module._mcpe_pointerlock_lost)
         Module._mcpe_pointerlock_lost();
+    });
+  })();
+  </script>
+
+  <script>
+  // ---------------------------------------------------------------------------
+  // The touch front page.
+  //
+  // A phone gets one screen and no keyboard, so the page has to hand the whole
+  // of it to the game and put everything else -- fullscreen, orientation, the
+  // save buttons -- behind a single tap. That tap is also the user gesture the
+  // browser insists on before it will grant fullscreen, lock the orientation or
+  // start the audio context, which is why they all happen together.
+  // ---------------------------------------------------------------------------
+  (function () {
+    if (!window.mcpeTouch) return;
+
+    var launch  = document.getElementById('launch');
+    var playBtn = document.getElementById('playBtn');
+    var exitBtn = document.getElementById('exit');
+    var rotate  = document.getElementById('rotateHint');
+
+    // One set of save controls, moved rather than duplicated.
+    launch.appendChild(document.getElementById('saves'));
+    launch.appendChild(document.getElementById('saveMsg'));
+    document.getElementById('fullscreenBtn').remove();
+
+    function portrait() {
+      return window.innerHeight > window.innerWidth;
+    }
+
+    function updateRotateHint() {
+      rotate.textContent = portrait() ? 'Turn your phone sideways to play' : '';
+    }
+    updateRotateHint();
+    window.addEventListener('resize', updateRotateHint);
+    window.addEventListener('orientationchange', updateRotateHint);
+
+    window.mcpeOnReady = function () {
+      playBtn.disabled = false;
+      playBtn.textContent = '▶  Play fullscreen';
+    };
+
+    function show() {
+      launch.classList.remove('hidden');
+      exitBtn.classList.add('hidden');
+      updateRotateHint();
+    }
+
+    function hide() {
+      launch.classList.add('hidden');
+      exitBtn.classList.remove('hidden');
+      window.fitCanvas();
+    }
+
+    playBtn.addEventListener('click', function () {
+      // Hide first: fullscreen may be refused (an iPhone has no element
+      // fullscreen) and the game should start regardless.
+      hide();
+      window.mcpeFullscreen.enter();
+    });
+
+    exitBtn.addEventListener('click', function () {
+      window.mcpeFullscreen.exit();
+      show();
+    });
+
+    // Deliberately not re-shown when fullscreen ends. Fullscreen goes away for
+    // reasons that have nothing to do with wanting the menu -- naming a world
+    // opens a prompt(), and Chrome drops fullscreen for any modal dialog -- and
+    // putting the launch screen back over a running game each time is worse
+    // than sitting in the browser's own chrome. The button is the way back.
+
+    // The page itself must not scroll, zoom or bounce -- those gestures belong
+    // to the game. The launch overlay is the one thing that may scroll, since
+    // it can be taller than a phone in landscape.
+    document.addEventListener('touchmove', function (e) {
+      if (!launch.classList.contains('hidden') && launch.contains(e.target)) return;
+      e.preventDefault();
+    }, { passive: false });
+
+    // Safari's pinch zoom is its own event and ignores touch-action.
+    ['gesturestart', 'gesturechange', 'gestureend'].forEach(function (name) {
+      document.addEventListener(name, function (e) { e.preventDefault(); });
     });
   })();
   </script>

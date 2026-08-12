@@ -16,7 +16,26 @@ Screen* ScreenChooser::createScreen( ScreenId id )
 {
 	Screen* screen = NULL;
 
-	if (_mc->useTouchscreen()) {
+	// The menus outside the world -- title, world list, join -- are the game's
+	// own artwork either way, and the touch versions are the ones people
+	// remember: three cards side by side rather than a column of buttons. They
+	// are driven by ordinary Screen mouse events, so a mouse works them fine.
+	// The in-world screens still follow the controls, since those do differ:
+	// the keyboard variant of the block picker is the one that closes on Escape.
+	bool touchMenus = _mc->useTouchscreen();
+#if defined(MC_WASM)
+	switch (id) {
+	case SCREEN_STARTMENU:
+	case SCREEN_SELECTWORLD:
+	case SCREEN_JOINGAME:
+		touchMenus = true;
+		break;
+	default:
+		break;
+	}
+#endif
+
+	if (touchMenus) {
 		switch (id) {
 		case SCREEN_STARTMENU:	screen = new Touch::StartMenuScreen();	break;
 		case SCREEN_SELECTWORLD:screen = new Touch::SelectWorldScreen();break;

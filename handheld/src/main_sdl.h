@@ -33,6 +33,14 @@
 static SDL_Window* g_window = 0;
 static bool g_running = true;
 
+/** True when the page is being viewed on a touch device, in which case the game
+    is built with its original touch UI instead of the keyboard + mouse one.
+
+    Decided by the page rather than here: it has to make the same call to lay
+    itself out, and one answer with one override (?touch= in the URL) beats two
+    that can disagree. Always false off the web, where there is a real pointer. */
+static bool g_touchscreen = false;
+
 /** SDL keysym -> the Windows-virtual-key-ish codes this codebase's Keyboard
     and Options key bindings are written against (see platform/input/Keyboard.h). */
 static unsigned char transformKey(SDL_Keycode key)
@@ -137,6 +145,76 @@ extern "C" EMSCRIPTEN_KEEPALIVE void mcpe_resize(int width, int height)
 }
 #endif
 
+/** Fingers to pointer slots.
+
+    Multitouch is indexed by a small dense pointer id -- Android's, which counts
+    up from 0 and is reused as fingers lift. An SDL_FingerID is neither: on the
+    web it is the browser's Touch.identifier, an opaque number that Safari in
+    particular lets grow without bound. So a finger takes the lowest free slot
+    when it lands and gives it back when it lifts. */
+static const int MAX_FINGERS = 8;
+static SDL_FingerID g_fingerIds[MAX_FINGERS];
+static bool g_fingerUsed[MAX_FINGERS];
+
+static int findFingerSlot(SDL_FingerID id)
+{
+	for (int i = 0; i < MAX_FINGERS; ++i)
+		if (g_fingerUsed[i] && g_fingerIds[i] == id)
+			return i;
+	return -1;
+}
+
+static int acquireFingerSlot(SDL_FingerID id)
+{
+	const int existing = findFingerSlot(id);
+	if (existing >= 0)
+		return existing;
+
+	for (int i = 0; i < MAX_FINGERS; ++i) {
+		if (!g_fingerUsed[i]) {
+			g_fingerUsed[i] = true;
+			g_fingerIds[i] = id;
+			return i;
+		}
+	}
+	// More fingers than slots. Dropping the newest is the least surprising
+	// answer: the ones already down are the ones holding a button.
+	return -1;
+}
+
+static void handleFingerEvent(const SDL_TouchFingerEvent& finger, int type)
+{
+	// SDL reports finger positions normalised to the window, 0..1.
+	const short x = (short)(finger.x * g_state.drawableWidth);
+	const short y = (short)(finger.y * g_state.drawableHeight);
+
+	int slot;
+	if (type == SDL_FINGERDOWN) slot = acquireFingerSlot(finger.fingerId);
+	else                        slot = findFingerSlot(finger.fingerId);
+	if (slot < 0)
+		return;
+
+	// Both queues, as the Android build does: Multitouch drives the d-pad and
+	// the look/dig control, while the menu screens read Mouse.
+	switch (type) {
+	case SDL_FINGERDOWN:
+		Mouse::feed(MouseAction::ACTION_LEFT, MouseAction::DATA_DOWN, x, y);
+		Multitouch::feed(MouseAction::ACTION_LEFT, MouseAction::DATA_DOWN, x, y, (char)slot);
+		break;
+
+	case SDL_FINGERUP:
+		Mouse::feed(MouseAction::ACTION_LEFT, MouseAction::DATA_UP, x, y);
+		Multitouch::feed(MouseAction::ACTION_LEFT, MouseAction::DATA_UP, x, y, (char)slot);
+		g_fingerUsed[slot] = false;
+		break;
+
+	case SDL_FINGERMOTION:
+		Mouse::feed(MouseAction::ACTION_MOVE, MouseAction::DATA_UP, x, y);
+		Multitouch::feed(MouseAction::ACTION_MOVE, MouseAction::DATA_UP, x, y, (char)slot);
+		break;
+	}
+}
+
 static void handleEvent(const SDL_Event& event)
 {
 	switch (event.type) {
@@ -174,8 +252,21 @@ static void handleEvent(const SDL_Event& event)
 		break;
 	}
 
+	case SDL_FINGERDOWN:
+	case SDL_FINGERUP:
+	case SDL_FINGERMOTION:
+		handleFingerEvent(event.tfinger, event.type);
+		break;
+
 	case SDL_MOUSEBUTTONDOWN:
 	case SDL_MOUSEBUTTONUP: {
+		// SDL also reports every touch as a mouse click. handleFingerEvent has
+		// already fed that finger, and letting the copy through would feed the
+		// GUI two clicks for one tap -- enough to walk a menu selection past
+		// where the player put it.
+		if (event.button.which == SDL_TOUCH_MOUSEID)
+			break;
+
 		const char down = (event.type == SDL_MOUSEBUTTONDOWN) ? 1 : 0;
 		char button = 0;
 		if (event.button.button == SDL_BUTTON_LEFT)  button = MouseAction::ACTION_LEFT;
@@ -190,6 +281,9 @@ static void handleEvent(const SDL_Event& event)
 	}
 
 	case SDL_MOUSEMOTION: {
+		if (event.motion.which == SDL_TOUCH_MOUSEID)
+			break;
+
 		const short x = (short)(event.motion.x * g_state.mouseScaleX);
 		const short y = (short)(event.motion.y * g_state.mouseScaleY);
 		Multitouch::feed(0, 0, x, y, 0);
@@ -240,7 +334,7 @@ static void startApp(const std::string& dataDir, const std::string& storagePath)
 	printf("Assets:  %s\nSaves:   %s\n", dataDir.c_str(), storagePath.c_str());
 
 	g_state.appContext.doRender = true;
-	g_state.appContext.platform = new AppPlatform_sdl(dataDir, g_state.drawableWidth, g_state.drawableHeight);
+	g_state.appContext.platform = new AppPlatform_sdl(dataDir, g_state.drawableWidth, g_state.drawableHeight, g_touchscreen);
 
 	g_state.app = new MAIN_CLASS();
 	g_state.app->externalStoragePath = storagePath;
@@ -276,7 +370,13 @@ int main(int argc, char** argv)
 	setvbuf(stdout, NULL, _IONBF, 0);
 	setvbuf(stderr, NULL, _IONBF, 0);
 
-	if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+#if defined(__EMSCRIPTEN__)
+	// The page has already worked this out for its own layout; see shell.html.
+	g_touchscreen = EM_ASM_INT({ return window.mcpeTouch ? 1 : 0; }) != 0;
+	printf("Touchscreen: %d\n", g_touchscreen ? 1 : 0);
+#endif
+
+	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS) < 0) {
 		printf("Couldn't initialize SDL: %s\n", SDL_GetError());
 		return -1;
 	}
@@ -294,11 +394,23 @@ int main(int argc, char** argv)
 	g_state.windowWidth = 854;
 	g_state.windowHeight = 480;
 
+	// ALLOW_HIGHDPI is deliberately absent on the web. With it, SDL sizes the
+	// canvas backing store at window size x devicePixelRatio while the page
+	// asks for -- and the game is told about -- the CSS size, so on a phone at
+	// dpr 2.6 the game drew an 863x360 frame into a 2265x945 buffer and filled
+	// a corner of the screen. A desktop browser at dpr 1 never showed it. The
+	// page's own comment on fitCanvas has the reasoning for staying at CSS
+	// pixels; this is the flag that has to agree with it.
+	Uint32 windowFlags = SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE;
+#if !defined(__EMSCRIPTEN__)
+	windowFlags |= SDL_WINDOW_ALLOW_HIGHDPI;
+#endif
+
 	g_window = SDL_CreateWindow(
 		"Minecraft Pocket Edition v0.6.1 alpha",
 		SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
 		g_state.windowWidth, g_state.windowHeight,
-		SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+		windowFlags);
 
 	if (!g_window) {
 		printf("Couldn't create window: %s\n", SDL_GetError());

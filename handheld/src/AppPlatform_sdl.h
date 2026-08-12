@@ -23,10 +23,11 @@ public:
 	static const int USERINPUT_OK        =  1;
 	static const int USERINPUT_NOTINITED = -2;
 
-	AppPlatform_sdl(const std::string& dataDir, int width, int height)
+	AppPlatform_sdl(const std::string& dataDir, int width, int height, bool touchscreen)
 	:	_dataDir(dataDir),
 		_width(width),
 		_height(height),
+		_touchscreen(touchscreen),
 		_userInputStatus(USERINPUT_NOTINITED)
 	{}
 
@@ -55,9 +56,12 @@ public:
 	/// devices of 2013 were being sorted against.
 	bool isSuperFast() { return true; }
 
-	/// Reporting no touchscreen makes Minecraft pick the keyboard + mouse
-	/// input holder and default Options::useTouchScreen to false.
-	bool supportsTouchscreen() { return false; }
+	/// Decided once at startup and never changed: it picks which input holder
+	/// Minecraft builds (touch d-pad vs keyboard + mouse), which screens
+	/// ScreenChooser hands out, and the default for Options::useTouchScreen.
+	/// A desktop browser says false and gets the pointer-lock controls; a
+	/// phone or tablet says true and gets the game's original touch UI.
+	bool supportsTouchscreen() { return _touchscreen; }
 
 	int getScreenWidth()  { return _width; }
 	int getScreenHeight() { return _height; }
@@ -71,6 +75,7 @@ private:
 	std::string _dataDir;
 	int _width;
 	int _height;
+	bool _touchscreen;
 
 	int _userInputStatus;
 	StringVector _userInput;

@@ -134,10 +134,17 @@ void OptionsScreen::generateOptionScreens() {
 	for (int i = 0; i < (int)categoryButtons.size(); ++i)
 		optionPanes.push_back(new OptionsPane());
 
-	// Controls
-	optionPanes[0]->createOptionsGroup("options.group.mouse")
-		.addOptionItem(&Options::Option::SENSITIVITY, minecraft)
-		.addOptionItem(&Options::Option::INVERT_MOUSE, minecraft);
+	// Controls. Which ones are worth showing depends on what the player is
+	// holding: a phone has no mouse to invert, and a desktop browser has no
+	// touch pad to split off.
+	if (minecraft->useTouchscreen()) {
+		optionPanes[0]->createOptionsGroup("options.group.touch")
+			.addOptionItem(&Options::Option::SENSITIVITY, minecraft);
+	} else {
+		optionPanes[0]->createOptionsGroup("options.group.mouse")
+			.addOptionItem(&Options::Option::SENSITIVITY, minecraft)
+			.addOptionItem(&Options::Option::INVERT_MOUSE, minecraft);
+	}
 
 	// Graphics. Render distance matters most here -- this is a browser game
 	// running a fixed-function renderer, so being able to trade view range for
