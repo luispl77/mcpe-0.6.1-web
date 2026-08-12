@@ -50,7 +50,7 @@ jobs:
           cp handheld/project/web/build/minecraftpe.data site/
           # Menu music, only present once a track has been dropped into
           # handheld/project/web/. Without it the page simply plays nothing.
-          cp handheld/project/web/build/menu.m4a site/ 2>/dev/null || true
+          cp handheld/project/web/build/menu.mp3 site/ 2>/dev/null || true
           ls -lh site
 
       - uses: actions/upload-pages-artifact@v3

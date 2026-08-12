@@ -755,7 +755,10 @@
   // silent, which is how 0.6.1 always was.
   // ---------------------------------------------------------------------------
   (function () {
-    var TRACK = 'menu.m4a';
+    // mp3 rather than the aac the sound effects use: the track arrives as mp3,
+    // every browser plays it, and re-encoding one lossy format into another
+    // costs quality to save nothing.
+    var TRACK = 'menu.mp3';
 
     var el = null;
     var wanted = false;   // what the game last asked for

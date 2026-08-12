@@ -115,13 +115,13 @@ set_target_properties(minecraftpe PROPERTIES
 # needs it until the menu is on screen, so streaming it keeps the wait before the
 # game appears exactly as long as it was. Absent, the page plays nothing -- see
 # the music block in shell.html.
-set(MUSIC_FILE "${CMAKE_CURRENT_SOURCE_DIR}/menu.m4a")
+set(MUSIC_FILE "${CMAKE_CURRENT_SOURCE_DIR}/menu.mp3")
 if(EXISTS "${MUSIC_FILE}")
     add_custom_command(TARGET minecraftpe POST_BUILD
         COMMAND "${CMAKE_COMMAND}" -E copy_if_different
-                "${MUSIC_FILE}" "$<TARGET_FILE_DIR:minecraftpe>/menu.m4a")
+                "${MUSIC_FILE}" "$<TARGET_FILE_DIR:minecraftpe>/menu.mp3")
 else()
-    message(STATUS "No menu.m4a beside shell.html -- building without menu music.")
+    message(STATUS "No menu.mp3 beside shell.html -- building without menu music.")
 endif()
 
 target_link_libraries(minecraftpe PRIVATE raknet)
