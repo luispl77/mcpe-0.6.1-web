@@ -2,6 +2,8 @@
 
 #if defined(MC_WASM)
 
+#include "../raknet/RakPeerInterface.h"
+
 #include <emscripten.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -57,13 +59,32 @@ void mcpeLobbySetWorld(const std::string& worldName)
 }
 
 WebLobbyRakNetInstance::WebLobbyRakNetInstance()
-:	_listing(false)
+:	_peer(NULL),
+	_listing(false)
 {
+	// Constructed exactly as RakNetInstance does, and then left alone. See the
+	// note on getPeer(): the handlers dereference this from the first tile
+	// change onward, so it cannot be null. Nothing here starts it.
+	_peer = RakNet::RakPeerInterface::GetInstance();
 }
 
 WebLobbyRakNetInstance::~WebLobbyRakNetInstance()
 {
 	mcpe_lobby_leave();
+
+	// No Shutdown() first, unlike RakNetInstance: it was never started, and
+	// Shutdown's wait-for-threads loops are the last thing to walk into on a
+	// build that has none.
+	if (_peer)
+	{
+		RakNet::RakPeerInterface::DestroyInstance(_peer);
+		_peer = NULL;
+	}
+}
+
+RakNet::RakPeerInterface* WebLobbyRakNetInstance::getPeer()
+{
+	return _peer;
 }
 
 bool WebLobbyRakNetInstance::host(const std::string& localName, int /*port*/, int /*maxConnections*/)

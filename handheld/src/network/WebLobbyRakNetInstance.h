@@ -73,10 +73,27 @@ public:
 	/// Always false: see the note above about listing versus joining.
 	virtual bool connect(const char* host, int port);
 
+	/** A real peer that is never started. It has to be a real one.
+
+	    ServerSideNetworkHandler is a LevelListener, and its tileChanged() -- one
+	    of the most-fired callbacks there is while a world loads -- goes straight
+	    to rakPeer->Send(), where rakPeer is whatever getPeer() handed back at
+	    construction. Inheriting the base, which returns NULL, meant the first
+	    tile change of the first world load dereferenced null and took the page
+	    down with "memory access out of bounds".
+
+	    RakNetInstance always built one in its constructor, so sending into an
+	    unstarted peer is the behaviour every world load on the web has always
+	    had, and it is harmless: the peer is inactive, so the sends go nowhere.
+	    Startup() and Ping(), the two calls that actually cannot work in a
+	    browser, are simply never reached from here. */
+	virtual RakNet::RakPeerInterface* getPeer();
+
 private:
 	/// Pulls whatever the page last heard and rebuilds _servers from it.
 	void refresh();
 
+	RakNet::RakPeerInterface* _peer;
 	ServerList _servers;
 	bool       _listing;
 };
