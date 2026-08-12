@@ -18,6 +18,12 @@ curl -s localhost:8477 | python3 -m json.tool
 (35000 ms) are the only knobs. `GET /` describes the service to whoever finds
 the port open months from now.
 
+`mcpe-lobby.service` beside this file is a systemd unit template. Nothing in
+this repo installs it — copy it to `/etc/systemd/system/` on whichever box is
+going to host the lobby. It binds to localhost, so putting it on the public
+internet is a separate, deliberate step: a reverse proxy in front terminating
+TLS, because a browser will not let an https page fetch http.
+
 | Route | |
 |---|---|
 | `GET /` | what this is, and how many are on it |
