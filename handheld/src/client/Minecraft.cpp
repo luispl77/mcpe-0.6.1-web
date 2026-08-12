@@ -600,16 +600,27 @@ void Minecraft::tick(int nTick, int maxTick) {
 		   the last slice left behind, so each frame shows the bar one step
 		   further along.
 
-		   Four chunk columns a frame. The pass is CHUNK_CACHE_WIDTH squared =
-		   256 of them, so a world lands in about sixty frames -- near enough the
-		   time it took when it blocked, with the difference that the page is
-		   drawing throughout instead of frozen. */
-		if (_prepInProgress && prepareLevelChunkStep(4)) {
-			prepareLevelFinish();
-			_prepInProgress = false;
-			// What generateLevel() does at the end of the blocking path; the
-			// next update() picks it up and calls _levelGenerated().
-			isGeneratingLevel = false;
+		   One column at a time under a frame budget, rather than a fixed batch.
+		   Columns are wildly uneven: getTile pulls a chunk into being and the
+		   light settling behind it can run for a long time on a new world, so a
+		   flat four-per-frame measured as a 1.2s freeze with the bar parked at
+		   7%. Taking them singly bounds a stall to whatever one column costs,
+		   and the budget still lets a fast machine chew through many per frame
+		   rather than stretching a quick load over 256 needless frames. */
+		if (_prepInProgress) {
+			const int sliceStart = getTimeMs();
+			bool prepDone;
+			do {
+				prepDone = prepareLevelChunkStep(1);
+			} while (!prepDone && (getTimeMs() - sliceStart) < 16);
+
+			if (prepDone) {
+				prepareLevelFinish();
+				_prepInProgress = false;
+				// What generateLevel() does at the end of the blocking path; the
+				// next update() picks it up and calls _levelGenerated().
+				isGeneratingLevel = false;
+			}
 		}
 #endif
 		return;
