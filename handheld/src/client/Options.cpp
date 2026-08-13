@@ -3,7 +3,12 @@
 #include "Minecraft.h"
 #include "../platform/log.h"
 #include "../world/Difficulty.h"
+#ifndef STANDALONE_SERVER
+// Only rebuildChunks() needs the definition, and there is nothing to rebuild on
+// a server. Including it unconditionally drags gles.h -- and so a GL header --
+// into a build that has no renderer at all.
 #include "renderer/LevelRenderer.h"
+#endif
 #include <cmath>
 #include <sstream>
 /*static*/
@@ -147,8 +152,10 @@ void Options::setSensitivity(float raw)
 
 void Options::rebuildChunks()
 {
+#ifndef STANDALONE_SERVER
 	if (minecraft && minecraft->levelRenderer)
 		minecraft->levelRenderer->allChanged();
+#endif
 }
 
 const Options::Option

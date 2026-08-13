@@ -1,10 +1,12 @@
 cmake_minimum_required(VERSION 2.8.7)
+set(CMAKE_CXX_STANDARD 98)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package (Threads)
 include_directories("${PROJECT_SOURCE_DIR}/../lib_projects/raknet/jni/RaknetSources")
 add_subdirectory("${PROJECT_SOURCE_DIR}/../lib_projects/raknet/jni" "${CMAKE_CURRENT_BINARY_DIR}/raknet")
 add_definitions(-DSTANDALONE_SERVER)
-set(CMAKE_C_FLAGS -m32)
-set(CMAKE_CXX_FLAGS -m32)
+set(CMAKE_C_FLAGS "")
+set(CMAKE_CXX_FLAGS "")
 set(CompileFiles ../../src/main.cpp
 ../../src/main_dedicated.cpp
 ../../src/platform/input/Controller.cpp
