@@ -106,6 +106,21 @@ location / {
 }
 ```
 
+When you check that the upgrade really does pass, **force HTTP/1.1**:
+
+```sh
+curl -s --http1.1 --max-time 8 -o /dev/null -w '%{http_code}\n' \
+  -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+  -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+  https://host/lobby/relay
+```
+
+Without `--http1.1` curl negotiates h2, where `Connection` and `Upgrade` are not
+valid headers and are dropped — so the request arrives as an ordinary GET and
+the service answers `404`, which looks exactly like a proxy that is eating the
+upgrade. `--max-time` matters too: a real `101` holds the socket open, so the
+success case is a timeout with `101` already printed.
+
 `MCPE_LOBBY_TRUST_PROXY=1` makes it believe `X-Forwarded-For`. Leave it **off**
 unless something we control is in front, because the header is client-supplied
 and trusting it on a directly-reachable service lets anyone forge a source.
