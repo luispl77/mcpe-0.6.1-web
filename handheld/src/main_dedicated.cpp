@@ -64,7 +64,13 @@ int main(int numArguments, char* pszArgs[]) {
 	while(!app->wantToQuit()) {
 		app->update();
 		//pthread_yield();
-		sleep(20);
+		// Milliseconds, not seconds. sleep(20) is twenty seconds a lap, and the
+		// tick accounting hides how badly that misses: Timer::advanceTime clamps
+		// the gap it will account for to one second and then clamps again at
+		// MAX_TICKS_PER_UPDATE, so a 20s lap buys 10 ticks rather than 400.
+		// Against timer(20) that is 0.5 ticks/s -- measured at 36 ticks in 60s,
+		// where a server keeping up owes 1200.
+		usleep(20 * 1000);
 	}
 	((MAIN_CLASS*)g_app)->level->saveLevelData();
 	delete app;
