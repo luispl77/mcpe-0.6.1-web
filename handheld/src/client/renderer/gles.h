@@ -61,6 +61,21 @@
 	#define glFrustumf(a,b,c,d,e,f) glFrustum(a,b,c,d,e,f)
 #endif
 
+#if defined(__EMSCRIPTEN__)
+// Every other GL this game runs on treats glNormal3f outside glBegin/glEnd as
+// setting the current normal -- a piece of state, legal anywhere. The emulation
+// only implements it as an immediate-mode vertex attribute: it asserts on
+// GLImmediate.mode >= 0 and aborts the whole module otherwise. SignRenderer
+// sets a normal that way before drawing a sign's text, so a tab died the
+// instant any sign came into view, which took the edit screen with it.
+//
+// Dropping it costs nothing here. Nothing reads that normal: GL_LIGHTING is
+// never enabled anywhere in this renderer -- every mention of it is a disable
+// or is commented out -- and the geometry carries its colour per vertex. This
+// is the only call in the game, so the macro is not hiding a second one.
+#define glNormal3f(x, y, z) ((void)0)
+#endif
+
 
 #define GLERRDEBUG 1
 #if GLERRDEBUG

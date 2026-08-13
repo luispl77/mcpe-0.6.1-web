@@ -72,3 +72,12 @@ world arrives over `StartGamePacket`/`AddPlayerPacket` with "Steve joined the
 game" on screen. It is not scripted here because it drives a 2013 canvas UI by
 pixel coordinates, and a test that breaks whenever a menu moves is worse than no
 test.
+
+One thing to know before trying anyway: **a headless browser cannot turn the
+camera on the desktop build.** Playwright's synthetic mouse moves report
+`movementX`/`movementY` of exactly 0 once the canvas holds pointer lock, and
+pointer-locked look is the only thing those deltas feed, so the view never
+moves however far the cursor is driven. Force the touch build with `?touch=1`
+instead: a tap carries its own position, so placing a block needs no aiming at
+all, and dragging turns the camera through `TouchTurnInput`, which does not go
+through pointer lock. That is how the sign crash of 2026-08-13 was reproduced.
