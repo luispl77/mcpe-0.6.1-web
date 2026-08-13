@@ -63,6 +63,43 @@ check: push, dispatch, and read the run. If you do install it, the box is shared
 and has been OOM-killed by overlapping heavy jobs before — run the build through
 `/home/dev/continualmi/infra/watch/heavy.sh`.
 
+## Two deployments, one build
+
+| | |
+|---|---|
+| `luispl77.github.io/mcpe-0.6.1-web` | single-player, from `pages.yml` |
+| `mcpe.continualmi.com` | the LAN party, from the Hetzner serving box |
+
+**The wasm is identical.** What differs is two constants at the top of their
+blocks in `shell.html` — `LOBBY_URL` and `RELAY_URL` — for the same reason
+`window.mcpeTouch` lives there: they are properties of where this is deployed,
+not of the build. Empty means single-player, and every path degrades to that
+rather than erroring, which is what Pages ships.
+
+So **do not fork the build to turn multiplayer on or off**, and do not add a
+compile flag for it. A second wasm is a second thing to keep in step, and the
+whole point of the seam is that github.io and the LAN party are the same binary
+with a different page around it.
+
+Multiplayer needs all three of: the relay reachable over `wss:`, the board over
+`https:`, and a proxy that passes the upgrade through. Miss the last one and the
+list still fills while joining silently never happens — see `tools/lobby/README.md`.
+
+The three things RakNet assumes and a tab has not — UDP, threads, broadcast —
+are handled in `WebRakNetInstance` and behind `#if defined(MC_WASM)` in
+`RakPeer.cpp`/`SocketLayer.cpp`. Two traps live there:
+
+- `RunUpdateCycleOnce()` must be called with **real time between calls**. The
+  update cycle decides what to send from how long it has been, so a tight loop
+  of four is one frame counted four times, not four frames. That is why
+  `disconnect()` spreads its flush over 40ms rather than just calling it.
+- `handheld/src/raknet/` and `handheld/project/lib_projects/raknet/` are two
+  copies of RakNet and were byte-identical. The web build compiles the second;
+  the header the game includes comes from the first. **Patch both.**
+
+`tools/wiretest/` covers the parts of this that cannot be checked by reading
+them. Run `raknet.cpp` after touching anything under `#if defined(MC_WASM)`.
+
 ## How the game decides it is on a phone
 
 The page works it out **before the module loads** — a coarse primary pointer

@@ -64,6 +64,7 @@
   #wrap:fullscreen #hint,
   #wrap:fullscreen #saves,
   #wrap:fullscreen #saveMsg { display: none; }
+  #wrap:fullscreen #mpMsg { display: none; }
   #wrap:fullscreen { gap: 0; }
 
   #status { font-size: 13px; min-height: 1.2em; }
@@ -83,6 +84,8 @@
   button:hover:not(:disabled) { background: #3d3d3d; }
   button:disabled { opacity: 0.4; cursor: default; }
   #saveMsg { font-size: 12px; color: #7a9; min-height: 1.2em; }
+  #mpMsg { font-size: 12px; color: #7a9; min-height: 1.2em; }
+  #mpMsg a { color: #9d6; }
 
   /* The launch overlay and the exit button belong to the touch layout only. */
   #launch, #exit { display: none; }
@@ -256,6 +259,9 @@
       <input id="importFile" type="file" accept=".zip,application/zip" hidden>
     </div>
     <div id="saveMsg">Worlds live in this browser's storage — download them to keep a copy.</div>
+    <!-- Filled by the wire block below: where multiplayer is, or that it is
+         here. Empty until then so a build with neither says nothing at all. -->
+    <div id="mpMsg"></div>
 
     <!-- Touch only. Populated with the save buttons at startup so there is one
          set of them rather than two that can disagree. -->
@@ -494,6 +500,7 @@
     // One set of save controls, moved rather than duplicated.
     launch.appendChild(document.getElementById('saves'));
     launch.appendChild(document.getElementById('saveMsg'));
+    launch.appendChild(document.getElementById('mpMsg'));
     document.getElementById('fullscreenBtn').remove();
 
     function portrait() {
@@ -986,12 +993,186 @@
 
   <script>
   // ---------------------------------------------------------------------------
+  // The wire.
+  //
+  // 0.6.1 talks to other players over UDP, which a tab has none of. This holds
+  // one WebSocket to the relay in tools/lobby and moves RakNet's datagrams over
+  // it: send() addresses one at another player's route, recv() hands back the
+  // ones that have arrived. WebRakNetInstance.cpp is the only caller, through a
+  // SocketLayerOverride -- from RakNet's side nothing has moved.
+  //
+  // RELAY_URL empty is the off switch and multiplayer is then simply absent,
+  // which is what github.io serves: the game still lists players if a lobby is
+  // configured, and connect() refuses. ?relay=<url> points a local build at a
+  // local one.
+  //
+  // Nothing here retries a datagram or keeps one in order. That is not an
+  // omission -- it is a UDP socket, RakNet is what makes it reliable, and a
+  // second attempt at either would fight it.
+  // ---------------------------------------------------------------------------
+  (function () {
+    var RELAY_URL = '';
+
+    var url = new URLSearchParams(location.search).get('relay');
+    if (url === null) url = RELAY_URL;
+    url = (url || '').replace(/\/+$/, '');
+
+    var sock = null;
+    var route = 0;
+    var token = '';
+    var inbox = [];
+    var retryAt = 0;
+
+    // A tab that is not draining its inbox is a tab that has stopped ticking the
+    // game, and by the time it starts again these are far too old to be worth
+    // delivering. Dropping the oldest is what a socket receive buffer does when
+    // it overflows, and RakNet already treats loss as ordinary.
+    var MAX_INBOX = 256;
+
+    // Long enough not to hammer a service that is down, short enough that a
+    // player who blinked out gets back before their peers time them out at 20s.
+    var RETRY_MS = 3000;
+
+    function connect() {
+      if (!url || sock) return;
+      if (Date.now() < retryAt) return;
+
+      try {
+        sock = new WebSocket(url);
+      } catch (e) {
+        sock = null;
+        retryAt = Date.now() + RETRY_MS;
+        return;
+      }
+
+      sock.binaryType = 'arraybuffer';
+
+      sock.onmessage = function (e) {
+        // The one text frame is the greeting: which route this tab is, and the
+        // token that lets it prove so to /announce.
+        if (typeof e.data === 'string') {
+          try {
+            var hello = JSON.parse(e.data);
+            if (hello && hello.type === 'hello') {
+              route = hello.route >>> 0;
+              token = String(hello.token || '');
+              // A world that started before this arrived announced itself with
+              // route 0, which is "listed but not joinable". Say so again now
+              // rather than leaving it that way until the next heartbeat.
+              if (window.mcpeLobby) window.mcpeLobby.routeChanged();
+            }
+          } catch (err) { /* not ours */ }
+          return;
+        }
+        if (inbox.length >= MAX_INBOX) inbox.shift();
+        inbox.push(new Uint8Array(e.data));
+      };
+
+      // Both paths land here. Clearing the route matters: it is what stops the
+      // lobby publishing an address that no longer reaches this tab.
+      sock.onclose = function () {
+        sock = null;
+        route = 0;
+        token = '';
+        inbox.length = 0;
+        retryAt = Date.now() + RETRY_MS;
+      };
+      sock.onerror = function () { /* onclose always follows */ };
+    }
+
+    window.mcpeNet = {
+      // Whether this deployment has multiplayer at all -- not whether the socket
+      // happens to be up this instant. The game asks before starting a peer, and
+      // a peer that starts a round trip before its socket does is fine: the
+      // datagrams it sends meanwhile are lost, which is a thing RakNet's
+      // connection attempts already retry through.
+      enabled: function () { return !!url; },
+
+      ready: function () { return !!sock && sock.readyState === 1 && route !== 0; },
+      route: function () { return route; },
+      token: function () { return token; },
+
+      open: function () { connect(); },
+
+      close: function () {
+        if (sock) { try { sock.close(); } catch (e) { /* already gone */ } }
+        sock = null;
+        route = 0;
+        token = '';
+        inbox.length = 0;
+        // A deliberate close is not a failure to back off from: the next world
+        // should be able to open one immediately.
+        retryAt = 0;
+      },
+
+      send: function (dest, bytes) {
+        if (!sock || sock.readyState !== 1) return;
+        var out = new Uint8Array(4 + bytes.length);
+        out[0] = (dest >>> 24) & 255;
+        out[1] = (dest >>> 16) & 255;
+        out[2] = (dest >>> 8) & 255;
+        out[3] = dest & 255;
+        out.set(bytes, 4);
+        try { sock.send(out); } catch (e) { /* closing under us; onclose tidies */ }
+      },
+
+      // {route, bytes} for the oldest datagram waiting, or null. The four-byte
+      // header the relay wrote is peeled off here so the caller only ever sees
+      // what the other player's RakNet actually sent.
+      recv: function () {
+        while (inbox.length) {
+          var m = inbox.shift();
+          if (m.length < 4) continue;
+          return {
+            route: ((m[0] << 24) | (m[1] << 16) | (m[2] << 8) | m[3]) >>> 0,
+            bytes: m.subarray(4)
+          };
+        }
+        return null;
+      }
+    };
+
+    // The socket drops on its own if the game is between worlds, so something
+    // has to bring it back. Cheap: it returns immediately unless there is no
+    // socket and the backoff has expired.
+    setInterval(connect, 1000);
+
+    /* Says which of the two deployments this is, because otherwise the only way
+     * to find out is to open Join Game and see whether anybody is there.
+     *
+     * MULTIPLAYER_URL is where to send people when this build has no relay --
+     * the github.io one. It is separate from RELAY_URL because it is a page for
+     * humans rather than a socket, and a deployment that has multiplayer does
+     * not need to point anywhere. */
+    var MULTIPLAYER_URL = 'https://mcpe.continualmi.com/';
+
+    var mpMsg = document.getElementById('mpMsg');
+    if (mpMsg) {
+      if (url) {
+        mpMsg.textContent =
+          'Multiplayer is on. Other players can join your world from Join Game ' +
+          'while Visible to other players is set in Options.';
+      } else if (MULTIPLAYER_URL) {
+        var a = document.createElement('a');
+        a.href = MULTIPLAYER_URL;
+        a.textContent = MULTIPLAYER_URL.replace(/^https?:\/\//, '').replace(/\/$/, '');
+        a.rel = 'noopener';
+        mpMsg.appendChild(document.createTextNode('Single player. Multiplayer — one big LAN party — is at '));
+        mpMsg.appendChild(a);
+        mpMsg.appendChild(document.createTextNode('.'));
+      }
+    }
+  })();
+  </script>
+
+  <script>
+  // ---------------------------------------------------------------------------
   // Join Game presence.
   //
   // 0.6.1 finds games with a UDP broadcast to 255.255.255.255, which a tab
   // cannot send, so the Join card was always empty here. This announces "I am
   // playing" while a world is open and asks who else is, against the small
-  // service in tools/lobby. WebLobbyRakNetInstance.cpp reads it back out.
+  // service in tools/lobby. WebRakNetInstance.cpp reads it back out.
   //
   // The endpoint lives in the page rather than the wasm for the same reason
   // window.mcpeTouch does: it is a property of where this is deployed, not of
@@ -1025,18 +1206,6 @@
     var beat = null, poll = null;
     var others = [];
 
-    // The game keys its list by address and matches selection on it, so each
-    // player needs a distinct stable number. FNV-1a over the lobby id, which
-    // stays put as players come and go -- an index would not.
-    function key(text) {
-      var h = 2166136261;
-      for (var i = 0; i < text.length; i++) {
-        h ^= text.charCodeAt(i);
-        h = (h * 16777619) >>> 0;
-      }
-      return h >>> 0;
-    }
-
     function post(body) {
       if (!url) return;
       // keepalive so the "gone" on the way out still goes when the tab is
@@ -1049,7 +1218,20 @@
       }).catch(function () {});
     }
 
-    function beatOnce() { post({ id: id, name: name, world: world }); }
+    // The route is what other players dial, and the token is what stops anyone
+    // else claiming it. Both come from the relay socket and are absent while it
+    // is down or not configured, which publishes a route of 0 -- listed, not
+    // joinable. The next heartbeat carries the real one once the socket is up.
+    function beatOnce() {
+      var net = window.mcpeNet;
+      post({
+        id: id,
+        name: name,
+        world: world,
+        route: net ? net.route() : 0,
+        token: net ? net.token() : ''
+      });
+    }
 
     function refresh() {
       if (!url) { others = []; return; }
@@ -1082,10 +1264,20 @@
         if (beat) beatOnce();
       },
 
+      // The relay calls this when a route turns up or changes. Only meaningful
+      // while a world is running, which is exactly when `beat` is set.
+      routeChanged: function () {
+        if (beat) beatOnce();
+      },
+
       leave: function () {
         if (beat) { clearInterval(beat); beat = null; }
         post({ id: id, gone: true });
-        world = '';
+        // The world name is deliberately kept. Minecraft::hostMultiplayer
+        // disconnects before it hosts, and setLevel -- the only thing that knows
+        // the name -- has already run by then, so clearing it here published
+        // every world as nameless. Nothing is announced once the heartbeat has
+        // stopped, and the next world's setLevel overwrites it.
       },
 
       startListing: function () {
@@ -1102,7 +1294,7 @@
       // Flat records rather than JSON: the reader is C++03 with no parser in it.
       records: function () {
         return others.map(function (p) {
-          return (p.name || '') + '\t' + (p.world || '') + '\t' + key(p.id);
+          return (p.name || '') + '\t' + (p.world || '') + '\t' + ((p.route || 0) >>> 0);
         }).join('\n');
       }
     };

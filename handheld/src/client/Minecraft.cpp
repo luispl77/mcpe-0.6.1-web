@@ -13,7 +13,7 @@
 #endif
 
 #include "../network/RakNetInstance.h"
-#include "../network/WebLobbyRakNetInstance.h"
+#include "../network/WebRakNetInstance.h"
 #include "../network/ClientSideNetworkHandler.h"
 #include "../network/ServerSideNetworkHandler.h"
 //#include "../network/Packet.h"
@@ -208,10 +208,11 @@ Minecraft::Minecraft()
 #elif defined(MC_WASM)
 	// Not RakNetInstance: in a browser its pingForHosts() takes RakPeer through
 	// a Startup() that cannot succeed and then pings anyway, off the end of an
-	// empty socketList. Opening the Join card killed the page. This one lists
-	// players from the lobby service and never opens a socket -- see
-	// WebLobbyRakNetInstance.h for the whole mechanism.
-	raknetInstance = new WebLobbyRakNetInstance();
+	// empty socketList. This one lists players from the lobby service instead of
+	// broadcasting, and carries the game's traffic over a WebSocket relay rather
+	// than UDP -- see WebRakNetInstance.h for the whole mechanism. With no relay
+	// configured, which is what github.io serves, it lists and refuses to join.
+	raknetInstance = new WebRakNetInstance();
 #else
 	raknetInstance = new RakNetInstance();
 #endif

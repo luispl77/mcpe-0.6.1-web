@@ -5,17 +5,18 @@
 #   sudo systemctl daemon-reload && sudo systemctl enable --now mcpe-lobby
 #   curl -s localhost:8477            # says what it is
 #
-# It binds to 127.0.0.1 on purpose. The page is served over https from
-# github.io, so a browser will refuse to fetch http from it -- reaching this
-# from the public internet means a reverse proxy in front terminating TLS, and
-# that is a deliberate decision about exposing a box rather than a default this
-# file should make for you.
+# It binds to 127.0.0.1 on purpose. The page is served over https, so a browser
+# will refuse to fetch http or open ws from it -- reaching this from the public
+# internet means a reverse proxy in front terminating TLS, and that is a
+# deliberate decision about exposing a box rather than a default this file
+# should make for you. The proxy must also pass the WebSocket upgrade through,
+# or the board will work and joining silently will not; see the README.
 #
 # Stopping it is a supported state, not an outage: the Join card goes back to
-# an empty list, which is what it showed before the lobby existed.
+# an empty list, which is what it showed before any of this existed.
 
 [Unit]
-Description=mcpe-lobby -- presence list for the MCPE 0.6.1 web build
+Description=mcpe-lobby -- presence board and datagram relay for the MCPE 0.6.1 web build
 Documentation=https://github.com/luispl77/mcpe-0.6.1-web/blob/main/tools/lobby/README.md
 After=network.target
 
@@ -27,9 +28,10 @@ Environment=MCPE_LOBBY_PORT=8477
 Restart=on-failure
 RestartSec=5
 
-# It holds one Map of throwaway strings and talks to nothing. None of the
-# below is load-bearing for it working; it is here because a service reachable
-# from the internet should not also be able to reach the rest of the box.
+# It holds two Maps -- throwaway strings, and sockets -- and reaches nothing
+# else. None of the below is load-bearing for it working; it is here because a
+# service reachable from the internet should not also be able to reach the rest
+# of the box.
 DynamicUser=yes
 NoNewPrivileges=yes
 PrivateTmp=yes
@@ -44,7 +46,12 @@ RestrictNamespaces=yes
 LockPersonality=yes
 MemoryDenyWriteExecute=no
 SystemCallFilter=@system-service
-MemoryMax=128M
+
+# Measured at 87 MB with a full board and 200 relay sockets carrying traffic, so
+# this is roughly 3x headroom rather than a target. It was 128M when this only
+# held the board; the switch costs about 12 MB more and 128M left too little
+# room to be a backstop rather than a tripwire.
+MemoryMax=256M
 
 [Install]
 WantedBy=multi-user.target

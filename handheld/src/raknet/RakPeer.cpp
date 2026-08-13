@@ -526,6 +526,20 @@ StartupResult RakPeer::Startup( unsigned short maxConnections, SocketDescriptor 
 		ClearBufferedPackets();
 		ClearSocketQueryOutput();
 
+#if defined(MC_WASM)
+		// A browser tab has one thread, and this build has no -pthread, so none
+		// of the three loops below can run: RakThread::Create fails outright,
+		// and the two waits that follow it would then spin the page's only
+		// thread for ever. RunUpdateCycleOnce() does the same work from the game
+		// loop instead -- see the note on it in RakPeer.h.
+		//
+		// isMainLoopThreadActive is deliberately left false. Shutdown() waits
+		// for it to fall, so claiming a thread that does not exist would hang
+		// the tab on leaveGame. Nothing else needs it: IsActive() reads
+		// endThreads, which the block above has already cleared, so the rest of
+		// the library still sees a peer that started normally.
+		(void) threadPriority;
+#else
 		if ( isMainLoopThreadActive == false )
 		{
 			int errorCode;
@@ -576,6 +590,7 @@ StartupResult RakPeer::Startup( unsigned short maxConnections, SocketDescriptor 
 
 		while (  isMainLoopThreadActive == false )
 			RakSleep(10);
+#endif
 
 	}
 
@@ -5046,6 +5061,33 @@ unsigned int RakPeer::GetRakNetSocketFromUserConnectionSocketIndex(unsigned int 
 	RakAssert("GetRakNetSocketFromUserConnectionSocketIndex failed" && 0);
 	return (unsigned int) -1;
 }
+// --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+#if defined(MC_WASM)
+void RakPeer::RunUpdateCycleOnce(void)
+{
+	// The buffer UpdateNetworkLoop keeps outside its while(). Static rather than
+	// automatic because it allocates MAXIMUM_MTU_SIZE and this runs once a
+	// frame; there is one thread on the web, so there is nobody to share it
+	// with. timeNS/timeMS are 0 for the same reason the thread passes 0 --
+	// RunUpdateCycle sets them from the clock itself.
+	static BitStream updateBitStream( MAXIMUM_MTU_SIZE
+#if LIBCAT_SECURITY==1
+		+ cat::AuthenticatedEncryption::OVERHEAD_BYTES
+#endif
+		);
+
+	// endThreads is what the real loop tests each turn, and Shutdown() sets it.
+	// Without this a frame arriving mid-teardown would run a cycle against
+	// half-freed state.
+	if ( endThreads )
+		return;
+
+	if (userUpdateThreadPtr)
+		userUpdateThreadPtr(this, userUpdateThreadData);
+
+	RunUpdateCycle(0, 0, updateBitStream);
+}
+#endif
 // --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 bool RakPeer::RunUpdateCycle( RakNet::TimeUS timeNS, RakNet::Time timeMS, BitStream &updateBitStream )
 {

@@ -183,7 +183,14 @@ bool SocketLayer::IsSocketFamilySupported(const char *hostAddress, unsigned shor
 }
 bool SocketLayer::IsPortInUse(unsigned short port, const char *hostAddress, unsigned short socketFamily)
 {
-#if RAKNET_SUPPORT_IPV6!=1
+#if defined(MC_WASM)
+	// Nothing binds anything here, so nothing can be in use. Answering for real
+	// would mean a bind() that Startup() reads as SOCKET_PORT_ALREADY_IN_USE the
+	// moment two tabs on one machine pick the same port -- which they always do,
+	// because 19132 is a constant.
+	(void) port; (void) hostAddress; (void) socketFamily;
+	return false;
+#elif RAKNET_SUPPORT_IPV6!=1
 	(void) socketFamily;
 	return IsPortInUse_Old(port, hostAddress);
 #else
@@ -692,7 +699,21 @@ SOCKET SocketLayer::CreateBoundSocket( unsigned short port, bool blockingSocket,
 	(void) extraSocketOptions;
 	(void) socketFamily;
 
-#if RAKNET_SUPPORT_IPV6!=1
+#if defined(MC_WASM)
+	// A descriptor that is never handed to a syscall. Every send and receive on
+	// the web goes through the SocketLayerOverride installed by
+	// WebRakNetInstance, which routes on the SystemAddress and ignores this
+	// value -- but Startup() rejects (SOCKET)-1, so it has to be something.
+	//
+	// Emscripten does provide socket()/bind(), which is the reason this is not
+	// simply left alone: they would succeed, and the first sendto() past the
+	// override would then try to open a WebSocket to a websockify bridge that
+	// does not exist. Better to have no descriptor at all than a real one
+	// pointing somewhere nothing is listening.
+	(void) port; (void) forceHostAddress; (void) sleepOn10048;
+	static unsigned int nextFakeSocket = 1;
+	return (SOCKET) (nextFakeSocket++);
+#elif RAKNET_SUPPORT_IPV6!=1
 	return CreateBoundSocket_Old(port,blockingSocket,forceHostAddress,sleepOn10048,extraSocketOptions);
 #else
 
@@ -1752,7 +1773,17 @@ void SocketLayer::GetSystemAddress_Old ( SOCKET s, SystemAddress *systemAddressO
 }
 void SocketLayer::GetSystemAddress ( SOCKET s, SystemAddress *systemAddressOut )
 {
-#if RAKNET_SUPPORT_IPV6!=1
+#if defined(MC_WASM)
+	// getsockname() on a descriptor that was never a socket. Startup() overwrites
+	// this with SetToLoopback(4) on the path this build takes anyway; it is
+	// filled in rather than left alone so that a caller which does not is not
+	// reading uninitialised memory.
+	(void) s;
+	systemAddressOut->address.addr4.sin_family = AF_INET;
+	systemAddressOut->address.addr4.sin_addr.s_addr = 0;
+	systemAddressOut->address.addr4.sin_port = 0;
+	systemAddressOut->debugPort = 0;
+#elif RAKNET_SUPPORT_IPV6!=1
 	GetSystemAddress_Old(s,systemAddressOut);
 #else
 	socklen_t slen;

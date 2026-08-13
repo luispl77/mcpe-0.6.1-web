@@ -549,6 +549,21 @@ public:
 	virtual void GetSockets( DataStructures::List<RakNetSmartPtr<RakNetSocket> > &sockets );
 	virtual void ReleaseSockets( DataStructures::List<RakNetSmartPtr<RakNetSocket> > &sockets );
 
+#if defined(MC_WASM)
+	/// \brief One turn of the update thread, for builds that have no threads.
+	///
+	/// Startup() does not create UpdateNetworkLoop on the web -- see the MC_WASM
+	/// branch there -- so nothing would otherwise drain the buffered commands
+	/// that Connect() and Send() push, time out connections, or resend. This is
+	/// that loop's body without the loop, and the game calls it once a frame
+	/// from Minecraft::update.
+	///
+	/// Receiving rides along inside RunUpdateCycle: it pulls from the installed
+	/// SocketLayerOverride until that runs dry, which is the path RakNet already
+	/// had for getting data on the calling thread.
+	void RunUpdateCycleOnce(void);
+#endif
+
 	/// \internal
 	virtual void WriteOutOfBandHeader(RakNet::BitStream *bitStream);
 

@@ -5,9 +5,14 @@ the iPod touch and iPad 2, running at 60fps in a browser tab on hardware that
 did not exist when it was written.
 
 ### ▶ Play it: **https://luispl77.github.io/mcpe-0.6.1-web/**
+### ▶ Play it with other people: **https://mcpe.continualmi.com/**
 
-No install, no plugins. Singleplayer, survival or creative. Worlds save in your
-browser and can be downloaded as a `.zip`.
+No install, no plugins. Survival or creative. Worlds save in your browser and
+can be downloaded as a `.zip`.
+
+Two deployments of the same build. The first is single-player. The second is one
+big LAN party: open a world with **Visible to other players** on and it appears
+on everybody's Join Game screen, and theirs on yours.
 
 ![Title screen](docs/title.png)
 ![In game](docs/ingame.png)
@@ -37,14 +42,25 @@ platform seams around it.
 | Sound effects | ✅ |
 | Fullscreen | ✅ |
 | Options that persist | ✅ |
-| Music | ❌ |
-| Multiplayer | ❌ |
+| Menu music | ✅ |
+| Multiplayer | ✅ on mcpe.continualmi.com |
 
-**Multiplayer** cannot work in the browser — RakNet needs raw UDP sockets and
-browsers have none. It's disabled rather than half-working.
+**Multiplayer** works, which took getting around all three things 0.6.1 assumes
+and a tab does not have. There is no UDP, so the game's datagrams go over one
+WebSocket to a relay that forwards them to the tab they are addressed to. There
+are no threads, so `RakPeer::Startup` no longer makes any and the game loop
+turns RakNet's update cycle by hand. There is no broadcast, so the Join Game
+list is filled from a presence board instead of a shout into the LAN. RakNet
+itself is otherwise untouched — from its side nothing has moved, because it
+always had a seam for replacing the socket layer.
 
-**Music** was streamed from assets that aren't in the compiled-in PCM sound
-bank, so there's nothing to play. Sound effects are all present.
+Each player's own tab is the server for the world they opened, so no world is
+ever simulated on a server and the whole thing costs one small Node process.
+When the host closes the tab, their world goes with it — like unplugging the
+phone that was hosting. See [`tools/lobby`](tools/lobby/README.md).
+
+**In-game music** was streamed from assets that aren't in the compiled-in PCM
+bank, so there is nothing to play. The menu track and all sound effects work.
 
 ## On a phone or tablet
 

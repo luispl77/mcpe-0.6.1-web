@@ -31,14 +31,21 @@ set(EM_PORTS "-sUSE_SDL=2" "-sUSE_LIBPNG=1" "-sUSE_ZLIB=1")
 #
 # RakNet
 #
-# Browsers cannot open raw UDP sockets, so multiplayer cannot work here. RakNet
-# is still compiled in rather than stubbed out, because it reaches into
-# NinecraftApp and the whole network/ tree; unpicking that is a much larger and
-# riskier change than letting portable code compile and simply never listen.
+# Browsers cannot open raw UDP sockets, and this build has no threads either, so
+# two things RakNet takes for granted are missing. Both are handled inside RakNet
+# under MC_WASM rather than around it: Startup() skips the thread creation the
+# game loop now does by hand, and SocketLayer stops making descriptors nothing
+# will ever call a syscall on. The traffic itself leaves through the
+# SocketLayerOverride installed by WebRakNetInstance.
+#
+# MC_WASM has to reach this target too, not just the game: the guards are in
+# RakPeer and SocketLayer, and RakPeer.h declares a member that only exists with
+# it defined.
 #
 file(GLOB RAKNET_SOURCES "${RAKNET_DIR}/*.cpp")
 add_library(raknet STATIC ${RAKNET_SOURCES})
 target_include_directories(raknet PUBLIC "${RAKNET_DIR}")
+target_compile_definitions(raknet PUBLIC MC_WASM)
 target_compile_options(raknet PRIVATE -w ${EM_PORTS})
 
 #
