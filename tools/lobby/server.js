@@ -29,6 +29,8 @@
 
 const http = require('http');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 
 const NAME     = 'mcpe-lobby';
 const VERSION  = '1';
@@ -75,6 +77,44 @@ const RATE_BYTES     = Number(process.env.MCPE_RELAY_RATE || 512 * 1024);
 const MAX_SOCKETS    = Number(process.env.MCPE_RELAY_MAX || 200);
 
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
+
+/* The game itself, when this is the deployment serving it as well as the one
+ * joining it up. Empty -- the default -- serves no files at all and this is
+ * purely a lobby, which is how it runs locally and in the tests.
+ *
+ * It is here rather than in the proxy in front because that proxy is Caddy in a
+ * container on a box doing other things, and giving it a bind mount for a game
+ * means editing a compose file that production depends on. One process that
+ * can be installed, checked and stopped on its own is worth more than the
+ * marginal efficiency of a dedicated file server. */
+const WEB_ROOT = process.env.MCPE_WEB_ROOT || '';
+
+/* Where the service's own routes live, when it is also serving the game.
+ * `/lobby` puts the board at `/lobby/list` and leaves `/` to be the page.
+ *
+ * Serving both from one origin is deliberate -- it means no CORS and one
+ * certificate -- but it makes `/` ambiguous, and the ambiguity is not
+ * resolvable by guessing: `/` is the service's own description, and it is also
+ * index.html. So a web root without a prefix is refused at startup rather than
+ * silently picking one and leaving the other unreachable. */
+const PREFIX = (process.env.MCPE_LOBBY_PREFIX || '').replace(/\/+$/, '');
+
+if (WEB_ROOT && !PREFIX) {
+	console.error(NAME + ': MCPE_WEB_ROOT needs MCPE_LOBBY_PREFIX (e.g. /lobby).');
+	console.error('  Both the page and this service want "/", so the service has to move.');
+	process.exit(2);
+}
+
+const CONTENT_TYPES = {
+	'.html': 'text/html; charset=utf-8',
+	'.js':   'text/javascript; charset=utf-8',
+	// Required, not cosmetic: the browser refuses to stream-compile a wasm
+	// module served as anything else, and falls back to a slower path or fails.
+	'.wasm': 'application/wasm',
+	'.data': 'application/octet-stream',
+	'.mp3':  'audio/mpeg',
+	'.png':  'image/png'
+};
 
 const startedAt = Date.now();
 /** id -> {name, world, route, source, seen} */
@@ -177,8 +217,24 @@ function readBody(req, done) {
 	req.on('aborted', () => finish(null));
 }
 
+/** The service route a request is asking for, or null if it is asking for a file. */
+function routeOf(url) {
+	const asked = (url || '/').split('?')[0].replace(/\/+$/, '') || '/';
+	if (!PREFIX) return asked;
+	if (asked === PREFIX) return '/';
+	if (asked.startsWith(PREFIX + '/')) return asked.slice(PREFIX.length);
+	return null;
+}
+
 const server = http.createServer((req, res) => {
-	const route = (req.url || '/').split('?')[0].replace(/\/+$/, '') || '/';
+	const route = routeOf(req.url);
+
+	// Not addressed to the service at all: it is the page, or a 404 for one.
+	if (route === null) {
+		if (WEB_ROOT && (req.method === 'GET' || req.method === 'HEAD'))
+			return serveFile(req, res, (req.url || '/').split('?')[0]);
+		return send(res, 404, { error: 'not found', service: NAME });
+	}
 
 	if (req.method === 'OPTIONS') {
 		res.writeHead(204, {
@@ -269,6 +325,55 @@ const server = http.createServer((req, res) => {
 
 	return send(res, 404, { error: 'not found', service: NAME });
 });
+
+/* Static files, when WEB_ROOT is set.
+ *
+ * Revalidated rather than cached: sync-from-pages replaces every file in place
+ * and the names never change, so a browser told to cache minecraftpe.wasm would
+ * keep playing the old build until it evicted it. An ETag off mtime and size
+ * makes a repeat visit one cheap 304 per file instead of a re-download.
+ *
+ * Streamed rather than read: the .data package alone is 3.8 MB and the wasm is
+ * larger, and this process is supposed to stay small. */
+function serveFile(req, res, route) {
+	const rel = route === '/' ? 'index.html' : route.replace(/^\/+/, '');
+
+	// Resolve first, then check it is still inside the root. Rejecting "..' by
+	// pattern is the version of this that gets caught out by encodings.
+	let file;
+	try { file = path.resolve(WEB_ROOT, decodeURIComponent(rel)); }
+	catch (e) { return send(res, 400, { error: 'bad path' }); }
+
+	const root = path.resolve(WEB_ROOT);
+	if (file !== root && !file.startsWith(root + path.sep))
+		return send(res, 403, { error: 'outside root' });
+
+	fs.stat(file, (err, st) => {
+		if (err || !st.isFile()) return send(res, 404, { error: 'not found', service: NAME });
+
+		const etag = '"' + st.size.toString(16) + '-' + st.mtimeMs.toString(16) + '"';
+		const headers = {
+			'Content-Type': CONTENT_TYPES[path.extname(file).toLowerCase()] || 'application/octet-stream',
+			'Cache-Control': 'no-cache',
+			'ETag': etag,
+			'Server': NAME + '/' + VERSION
+		};
+
+		if (req.headers['if-none-match'] === etag) {
+			res.writeHead(304, headers);
+			return res.end();
+		}
+
+		headers['Content-Length'] = st.size;
+		res.writeHead(200, headers);
+		if (req.method === 'HEAD') return res.end();
+
+		const stream = fs.createReadStream(file);
+		stream.on('error', () => res.destroy());
+		res.on('close', () => stream.destroy());
+		stream.pipe(res);
+	});
+}
 
 /* ---------------------------------------------------------------------------
  * The relay
@@ -444,10 +549,10 @@ function onData(conn, chunk) {
 }
 
 server.on('upgrade', (req, socket, head) => {
-	const path = (req.url || '/').split('?')[0].replace(/\/+$/, '') || '/';
+	const asked = routeOf(req.url);
 	const key = req.headers['sec-websocket-key'];
 
-	if (path !== '/relay' || !key ||
+	if (asked !== '/relay' || !key ||
 	    String(req.headers.upgrade || '').toLowerCase() !== 'websocket') {
 		socket.destroy();
 		return;
@@ -529,7 +634,8 @@ setInterval(() => {
 server.listen(PORT, HOST, () => {
 	console.log(NAME + '/' + VERSION + ' listening on ' + HOST + ':' + PORT +
 	            ' (ttl ' + Math.round(TTL_MS / 1000) + 's, max ' + MAX_PLAYERS +
-	            ', relay /relay max ' + MAX_SOCKETS + ')');
+	            ', relay /relay max ' + MAX_SOCKETS +
+	            ', web ' + (WEB_ROOT || 'off') + ')');
 });
 
 // Stopping is a supported outcome, not a failure: the client treats an

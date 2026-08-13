@@ -1,0 +1,45 @@
+# Add this vhost to /opt/continualmi/caddy/Caddyfile on the serving box, above
+# the *.continualmi.com block. Caddy matches the most specific host first, so
+# order is not strictly load-bearing -- but the wildcard's `respond 404` is what
+# this hostname does today, and reading them next to each other is how you see
+# that this replaced it.
+#
+# Caddy runs with `admin off`, so this needs
+#
+#   docker compose --profile app restart caddy
+#
+# which is a ~2s blip on every site the box serves, not just this one.
+
+# The board, the wire and the page all come from one process on loopback -- see
+# tools/lobby. Nothing here needs a bind mount, so the compose file is untouched.
+mcpe.continualmi.com {
+	# client_auth is Authenticated Origin Pulls: the site is public, but it
+	# should only be reachable *through* Cloudflare, not by dialling the box's
+	# IP with a Host header. It gates nothing for a player.
+	tls /certs/continualmi.com.pem /certs/continualmi.com.key {
+		client_auth {
+			mode require_and_verify
+			trust_pool file /certs/origin-pull-ca.pem
+		}
+	}
+
+	# The wasm and the .data package are the bulk of the download. Caddy will
+	# not gzip a response the upstream already compressed, and it leaves
+	# application/wasm alone unless told, so both are named explicitly.
+	encode zstd gzip
+
+	reverse_proxy 172.18.0.1:8477 {
+		# The relay is a long-lived WebSocket that is silent whenever both
+		# players are standing still. Caddy has no read timeout by default, so
+		# there is nothing to raise here -- but flush_interval -1 matters: it
+		# disables response buffering, which would otherwise add latency to
+		# every datagram on the way back to a player.
+		flush_interval -1
+
+		# Overwrite, never append. The lobby's per-source cap counts players by
+		# IP, and behind a proxy every player arrives from the proxy -- so the
+		# service is told to trust this header (MCPE_LOBBY_TRUST_PROXY=1) and
+		# that is only safe because this line replaces whatever a client sent.
+		header_up X-Forwarded-For {http.request.remote.host}
+	}
+}
