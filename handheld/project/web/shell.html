@@ -1479,6 +1479,19 @@
        * the game does not tell the page it is joining, it just starts sending,
        * and the first datagram to a locked route is the only reliable signal
        * that somebody is trying to get in. */
+      /** The manager's id for the world on this route, or '' for a player.
+
+          The game only ever knows a route -- the fake address it dials -- and
+          every management call names a world by id. The board carries both, so
+          this is where the two meet rather than teaching the game about ids it
+          has no other use for. */
+      idForRoute: function (route) {
+        for (var i = 0; i < others.length; i++)
+          if ((others[i].route >>> 0) === (route >>> 0) && others[i].dedicated)
+            return others[i].id || '';
+        return '';
+      },
+
       needsUnlock: function (route) {
         if (!route || opened[route]) return false;
         for (var i = 0; i < others.length; i++)
@@ -1515,8 +1528,13 @@
       },
 
       records: function () {
+        /* A fourth column, and a bitfield rather than two more: the reader is
+         * C++03 with no parser in it, and a build older than this one stops at
+         * the third tab and lists everything exactly as it did. */
         return others.map(function (p) {
-          return (p.name || '') + '\t' + (p.world || '') + '\t' + ((p.route || 0) >>> 0);
+          var flags = (p.dedicated ? 1 : 0) | (p.locked ? 2 : 0);
+          return (p.name || '') + '\t' + (p.world || '') + '\t' + ((p.route || 0) >>> 0) +
+                 '\t' + flags;
         }).join('\n');
       }
     };
@@ -1581,6 +1599,37 @@
     var status = NOTINITED;
     var last = null;
 
+    /* Which worlds this browser may delete or reconfigure.
+     *
+     * /create hands back a secret once and keeps only its hash, so this is the
+     * only copy. Kept in localStorage, which means ownership is a browser and
+     * not a person -- the honest description of what can be checked before
+     * there are accounts. When there are, an account replaces this and every
+     * route it feeds keeps its shape.
+     *
+     * Deliberately survives a world being deleted: the id is not reused while
+     * the world is running, and a stale entry costs a key nobody asks about. */
+    var OWNERS_KEY = 'mcpe.serverOwners';
+
+    function idForRoute(route) {
+      return (window.mcpeLobby && window.mcpeLobby.idForRoute)
+        ? window.mcpeLobby.idForRoute(route) : '';
+    }
+
+    function owners() {
+      try { return JSON.parse(localStorage.getItem(OWNERS_KEY) || '{}') || {}; }
+      catch (e) { return {}; }
+    }
+
+    function remember(id, secret) {
+      if (!id || !secret) return;
+      try {
+        var all = owners();
+        all[id] = secret;
+        localStorage.setItem(OWNERS_KEY, JSON.stringify(all));
+      } catch (e) { /* private mode: the world is still made, just not ours */ }
+    }
+
     window.mcpeServers = {
       enabled: function () { return !!url; },
 
@@ -1603,6 +1652,7 @@
           return r.ok ? r.json() : null;
         }).then(function (body) {
           last = body;
+          if (body) remember(body.id, body.owner);
           status = body ? OK : CANCEL;
         }).catch(function () {
           // An unreachable manager is a refusal, not an exception: the screen
@@ -1618,7 +1668,47 @@
         return s;
       },
 
-      created: function () { return last; }
+      created: function () { return last; },
+
+      /** Whether this browser holds the secret for the world on this route.
+          The game asks before it draws Delete, so a world somebody else made
+          has no button rather than a button that answers 403. */
+      canManage: function (route) {
+        var id = idForRoute(route);
+        return !!(id && owners()[id]);
+      },
+
+      /** Stops a world and moves its directory aside. Same fire-and-poll shape
+          as create(), because the screen that calls it polls the same way. */
+      remove: function (route) {
+        var id = idForRoute(route);
+        var secret = id && owners()[id];
+        if (!url || !secret) { status = CANCEL; return; }
+        status = NOTINITED;
+        fetch(url + '/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id: id, owner: secret })
+        }).then(function (r) { status = r.ok ? OK : CANCEL; })
+          .catch(function () { status = CANCEL; });
+      },
+
+      /** Rename, and set or clear the password. A blank password clears it. */
+      configure: function (route, name, password) {
+        var id = idForRoute(route);
+        var secret = id && owners()[id];
+        if (!url || !secret) { status = CANCEL; return; }
+        status = NOTINITED;
+        var patch = { id: id, owner: secret };
+        if (name) patch.name = name;
+        if (password !== null && password !== undefined) patch.password = password;
+        fetch(url + '/configure', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patch)
+        }).then(function (r) { status = r.ok ? OK : CANCEL; })
+          .catch(function () { status = CANCEL; });
+      }
     };
   })();
   </script>

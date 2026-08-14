@@ -23,7 +23,10 @@ class AvailableGamesList : public RolledSelectionListV
 
 public:
 	AvailableGamesList(Minecraft* _minecraft, int _width, int _height)
-	:	RolledSelectionListV(_minecraft, _width, _height, 0, _width, 24, _height, 34),
+	/* The list stops short of the bottom now: Join, Settings and Delete live
+	 * down there, and a row scrolling underneath them would be a row you could
+	 * see and not tap. */
+	:	RolledSelectionListV(_minecraft, _width, _height, 0, _width, 24, _height - 28, 34),
 		selectedItem(-1),
 		startSelected(-1)
 	{
@@ -63,7 +66,9 @@ public:
 
 	bool isInGameScreen();
 private:
-	Button bJoin;
+	TButton bJoin;
+	TButton bSettings;
+	TButton bDelete;
 	TButton bBack;
 	TButton bCreate;
 	THeader bHeader;
@@ -73,6 +78,12 @@ private:
 	 * rather than asked every frame, because setupPositions() sizes the header
 	 * around it and a button that came and went would resize the title bar. */
 	bool _canCreate;
+
+	/* Whether the selected row is a world this browser made, refreshed as the
+	 * selection changes rather than every frame: it is a call out to the page,
+	 * and the answer only moves when the selection does. */
+	bool _canManage;
+	int _managedItem;
 };
 
 };

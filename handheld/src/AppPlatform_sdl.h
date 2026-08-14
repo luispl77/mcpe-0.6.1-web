@@ -60,6 +60,11 @@ public:
 	                  const std::string& seed, const std::string& password);
 	int  createServerStatus();
 
+	bool canManageServer(unsigned int route);
+	void deleteServer(unsigned int route);
+	void configureServer(unsigned int route, const std::string& name,
+	                     const std::string& password, bool setPassword);
+
 	BinaryBlob readAssetFile(const std::string& filename);
 	TextureData loadTexture(const std::string& filename_, bool textureFolder);
 	void saveScreenshot(const std::string& filename, int glWidth, int glHeight);

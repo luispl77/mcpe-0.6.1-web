@@ -20,10 +20,39 @@ node tools/servers/manager.js
 | Route | |
 |---|---|
 | `GET /` | what this is, how many worlds are up |
-| `GET /list` | `{servers: [{id, name, world, locked, upSeconds, idleSeconds}]}` |
-| `POST /create` | `{name, password?}` → `{id, name, locked}` |
+| `GET /list` | `{servers: [{id, name, world, mode, locked, upSeconds, idleSeconds}]}` |
+| `POST /create` | `{name, mode?, seed?, password?}` → `{id, name, locked, owner}` |
+| `POST /configure` | `{id, owner\|key, name?, password?}` — rename, set or clear the password |
+| `POST /delete` | `{id, owner\|key}` — stops it and moves its directory aside |
 | `POST /seen` | `{id}` — says somebody is playing, so it is not reaped |
 | `POST /stop` | `{id, key}` — operator only |
+
+## Who may change a world
+
+`/create` mints an **owner secret**, hands it back exactly once, and keeps only
+its SHA-256. The page stores it in `localStorage` and presents it to `/configure`
+and `/delete`; the operator key works on the same routes.
+
+So ownership is currently *a browser*, not a person — which is the honest
+description of what can be checked before there are accounts, and it is why the
+game asks `canManageServer()` before it draws Settings and Delete at all: a
+world somebody else made has no button rather than a button that answers 403.
+When accounts land, an account takes the token's place and every route above
+keeps its shape.
+
+Two consequences worth knowing:
+
+- **A world made before this existed has no owner and can only be reached with
+  the operator key.** There is no way to adopt one, deliberately — a route that
+  handed out ownership of an unowned world would hand it to whoever asked first.
+- **Clearing the browser's storage loses the world.** It keeps running and stays
+  joinable; nobody can rename or delete it but an operator.
+
+`/delete` **archives rather than removes**: the world is stopped and its
+directory renamed to `.deleted-<id>-<stamp>`, still under `MCPE_SERVERS_ROOT`.
+The dot prefix keeps it out of the id space so `restore()` never brings it back.
+A world is the one thing here that cannot be rebuilt from the repo, and an
+operator can sweep the leftovers up whenever.
 
 It writes `MCPE_SERVERS_FILE` and sends the lobby a `SIGHUP`, which is a reload
 and not a restart: adding a world must not disconnect the people already in one.

@@ -135,7 +135,8 @@ function publish() {
 		list.push({
 			id: s.id, name: s.name, world: s.world, mode: s.mode, seed: s.seed,
 			host: '127.0.0.1', port: s.port,
-			salt: s.salt, passwordHash: s.passwordHash
+			salt: s.salt, passwordHash: s.passwordHash,
+			ownerHash: s.ownerHash
 		});
 
 	const tmp = SERVERS_FILE + '.tmp';
@@ -271,6 +272,16 @@ const server = http.createServer((req, res) => {
 
 			const password = typeof body.password === 'string' ? body.password : '';
 			const salt = password ? crypto.randomBytes(8).toString('hex') : '';
+
+			/* Who may delete or reconfigure this world. Handed back once, to the
+			 * page that asked for it, and kept here only as a hash -- so this
+			 * file being readable does not hand anybody else the world.
+			 *
+			 * It is a browser that owns a world rather than a person, which is
+			 * the honest description of what this can check today: there are no
+			 * accounts yet. When there are, an account takes the token's place
+			 * and the shape of every route below stays as it is. */
+			const owner = crypto.randomBytes(16).toString('hex');
 			const entry = {
 				id: id, name: name, world: cleanName(body.world) || 'dedicated', port: port,
 				/* Fixed when the world is made and never after: the mode is
@@ -282,7 +293,8 @@ const server = http.createServer((req, res) => {
 				 * means the server picks one. */
 				seed: String(body.seed || '').replace(/[^0-9-]/g, '').slice(0, 19),
 				salt: salt,
-				passwordHash: password ? crypto.createHash('sha256').update(salt + password).digest('hex') : ''
+				passwordHash: password ? crypto.createHash('sha256').update(salt + password).digest('hex') : '',
+				ownerHash: crypto.createHash('sha256').update(owner).digest('hex')
 			};
 
 			running.set(id, entry);
@@ -294,7 +306,8 @@ const server = http.createServer((req, res) => {
 			creates.set(source, recent);
 			publish();
 
-			return send(res, 200, { id: id, name: name, locked: !!entry.passwordHash });
+			// The only time the owner secret is ever sent anywhere.
+			return send(res, 200, { id: id, name: name, locked: !!entry.passwordHash, owner: owner });
 		});
 	}
 
@@ -307,6 +320,84 @@ const server = http.createServer((req, res) => {
 			const entry = running.get(String(body.id || ''));
 			if (entry) entry.seenAt = Date.now();
 			return send(res, 200, { ok: true });
+		});
+	}
+
+	/* Who is asking, for the routes that change a world rather than list one.
+	 *
+	 * Two ways in and no third: the browser that made the world, or an operator
+	 * with the key. Anonymous is not one of them -- the page is public, and a
+	 * delete button anybody could reach is a way to lose somebody's evening. */
+	function mayManage(entry, body) {
+		if (OPERATOR_KEY && String(body.key || '') === OPERATOR_KEY) return true;
+		const owner = String(body.owner || '');
+		if (!owner || !entry.ownerHash) return false;
+		// A world made before owners existed has no hash, and a file edited by
+		// hand could have a malformed one; timingSafeEqual throws on a length
+		// mismatch, so the shape is checked before the value.
+		if (!/^[0-9a-f]{64}$/.test(entry.ownerHash)) return false;
+		const given = crypto.createHash('sha256').update(owner).digest('hex');
+		return crypto.timingSafeEqual(Buffer.from(given, 'hex'), Buffer.from(entry.ownerHash, 'hex'));
+	}
+
+	/* Deleting a world stops it and moves its directory aside; it does not
+	 * remove anything. A world is the one thing here that cannot be rebuilt --
+	 * the binary, the page and the services can all be reinstalled from the
+	 * repo, and what somebody spent an evening building cannot. The dot prefix
+	 * keeps the leftovers out of the id space, so restore() never finds them
+	 * and an operator can sweep them up whenever. */
+	if (route === '/delete' && req.method === 'POST') {
+		return readBody(req, (body) => {
+			if (!body) return send(res, 400, { error: 'bad json' });
+			const entry = running.get(String(body.id || ''));
+			if (!entry) return send(res, 404, { error: 'no such server' });
+			if (!mayManage(entry, body)) return send(res, 403, { error: 'not yours' });
+
+			stop(entry);
+			const dir = path.join(ROOT, entry.id);
+			try {
+				const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
+				fs.renameSync(dir, path.join(ROOT, '.deleted-' + entry.id + '-' + stamp));
+			} catch (e) {
+				console.log('%s: could not archive %s: %s', entry.id, dir, e.message);
+			}
+			console.log('%s deleted', entry.id);
+			return send(res, 200, { ok: true });
+		});
+	}
+
+	/* Renaming, and setting or clearing the password.
+	 *
+	 * The mode is deliberately not here: it is written into level.dat when the
+	 * world is generated, so changing it on this side would only be the board
+	 * telling a story about a world that disagreed.
+	 *
+	 * A password change takes effect on the next datagram, because the lock
+	 * lives in the lobby's switch and the lobby re-reads this file whenever it
+	 * changes -- which is also why nothing needs restarting for it. */
+	if (route === '/configure' && req.method === 'POST') {
+		return readBody(req, (body) => {
+			if (!body) return send(res, 400, { error: 'bad json' });
+			const entry = running.get(String(body.id || ''));
+			if (!entry) return send(res, 404, { error: 'no such server' });
+			if (!mayManage(entry, body)) return send(res, 403, { error: 'not yours' });
+
+			if (typeof body.name === 'string' && cleanName(body.name))
+				entry.name = cleanName(body.name);
+
+			if (typeof body.password === 'string') {
+				if (body.password) {
+					entry.salt = crypto.randomBytes(8).toString('hex');
+					entry.passwordHash = crypto.createHash('sha256')
+						.update(entry.salt + body.password).digest('hex');
+				} else {
+					entry.salt = '';
+					entry.passwordHash = '';
+				}
+			}
+
+			publish();
+			return send(res, 200, { ok: true, name: entry.name, locked: !!entry.passwordHash });
 		});
 	}
 
@@ -367,7 +458,8 @@ function restore() {
 			mode: entry.mode === 'survival' ? 'survival' : 'creative',
 			seed: String(entry.seed || '').replace(/[^0-9-]/g, '').slice(0, 19),
 			salt: typeof entry.salt === 'string' ? entry.salt : '',
-			passwordHash: typeof entry.passwordHash === 'string' ? entry.passwordHash : ''
+			passwordHash: typeof entry.passwordHash === 'string' ? entry.passwordHash : '',
+			ownerHash: typeof entry.ownerHash === 'string' ? entry.ownerHash : ''
 		};
 		running.set(id, restored);
 		try { start(restored); } catch (e) { running.delete(id); }

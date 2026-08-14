@@ -182,6 +182,40 @@ int AppPlatform_sdl::createServerStatus()
 	return mcpe_servers_status();
 }
 
+EM_JS(int, mcpe_servers_can_manage, (unsigned int route), {
+	return (window.mcpeServers && window.mcpeServers.canManage(route)) ? 1 : 0;
+});
+
+EM_JS(void, mcpe_servers_remove, (unsigned int route), {
+	if (window.mcpeServers) window.mcpeServers.remove(route);
+});
+
+/* setPassword separates "clear it" from "leave it alone", which an empty
+ * string cannot: renaming a world must not also demand that somebody retype a
+ * password they never wrote down. Null on the page's side is "leave it". */
+EM_JS(void, mcpe_servers_configure, (unsigned int route, const char* name,
+                                     const char* password, int setPassword), {
+	if (window.mcpeServers)
+		window.mcpeServers.configure(route, UTF8ToString(name),
+		                             setPassword ? UTF8ToString(password) : null);
+});
+
+bool AppPlatform_sdl::canManageServer(unsigned int route)
+{
+	return mcpe_servers_can_manage(route) != 0;
+}
+
+void AppPlatform_sdl::deleteServer(unsigned int route)
+{
+	mcpe_servers_remove(route);
+}
+
+void AppPlatform_sdl::configureServer(unsigned int route, const std::string& name,
+                                      const std::string& password, bool setPassword)
+{
+	mcpe_servers_configure(route, name.c_str(), password.c_str(), setPassword ? 1 : 0);
+}
+
 /* ---------------------------------------------------------------------------
  * The soft keyboard
  *

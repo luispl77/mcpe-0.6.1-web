@@ -110,6 +110,20 @@ public:
 	                          const std::string& seed, const std::string& password) {}
 	virtual int  createServerStatus() { return 0; }
 
+	/** Managing one that already exists.
+
+	    Keyed by the route the game dials rather than by any id of the manager's,
+	    because a route is the only handle the game has ever held. The page knows
+	    both and does the translation.
+
+	    canManageServer() is what keeps a Delete button off a world somebody else
+	    made: asked before the button is drawn, so a stranger's world has no
+	    button rather than one that answers 403 when pressed. */
+	virtual bool canManageServer(unsigned int route) { return false; }
+	virtual void deleteServer(unsigned int route) {}
+	virtual void configureServer(unsigned int route, const std::string& name,
+	                             const std::string& password, bool setPassword) {}
+
 	virtual std::string getDateString(int s) { return ""; }
 	//virtual void createUserInputScreen(const char* types) {}
 
