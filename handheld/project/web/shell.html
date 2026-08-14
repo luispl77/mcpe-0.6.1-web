@@ -842,6 +842,12 @@
 
     function isOpen() { return !root.classList.contains('hidden'); }
 
+    /* Set when the page itself opened the panel rather than the game. The two
+     * cannot collide: the game only reads status() while it is waiting on a
+     * dialog it opened, and open() resets the state, so an answer the page took
+     * can never be read back by the game as its own. */
+    var asking = null;
+
     function close(result) {
       if (!isOpen()) return;
       // Read the fields before hiding: blurring an input can change nothing,
@@ -853,6 +859,12 @@
       if (document.activeElement && document.activeElement.blur)
         document.activeElement.blur();
       if (canvas) canvas.focus();
+
+      if (asking) {
+        var resolve = asking;
+        asking = null;
+        resolve(result === OK ? values.slice() : null);
+      }
     }
 
     form.addEventListener('submit', function (e) { e.preventDefault(); close(OK); });
@@ -905,7 +917,19 @@
       },
 
       status: function () { return state; },
-      value: function (i) { return values[i] != null ? values[i] : ''; }
+      value: function (i) { return values[i] != null ? values[i] : ''; },
+
+      /** The same panel, for things the page asks on its own account.
+
+          Resolves with the field values, or null if it was cancelled. The game
+          polls; the page has promises, and making it poll too would mean a
+          second state machine for the same overlay. */
+      ask: function (spec) {
+        return new Promise(function (resolve) {
+          asking = resolve;
+          window.mcpeDialog.open(spec);
+        });
+      }
     };
   })();
   </script>
@@ -1107,6 +1131,17 @@
 
       send: function (dest, bytes) {
         if (!sock || sock.readyState !== 1) return;
+
+        /* A locked server the player has not opened yet. Ask, and drop this
+         * one: the relay would drop it anyway, and RakNet's connection attempts
+         * retry, so the join simply completes once the password is in. Dropping
+         * rather than queueing on purpose -- a queue of stale handshake
+         * datagrams delivered a minute later is worse than none. */
+        if (window.mcpeLobby && window.mcpeLobby.needsUnlock(dest)) {
+          window.mcpeLobby.unlock(dest);
+          return;
+        }
+
         var out = new Uint8Array(4 + bytes.length);
         out[0] = (dest >>> 24) & 255;
         out[1] = (dest >>> 16) & 255;
@@ -1206,6 +1241,13 @@
     var beat = null, poll = null;
     var others = [];
 
+    /* Which locked servers this tab has opened, and which it is currently being
+     * asked about. Both are per tab and go with it: the unlock is bound to the
+     * relay socket at the far end, so remembering it anywhere more permanent
+     * would be remembering something that is no longer true. */
+    var opened = {};
+    var asking = {};
+
     function post(body) {
       if (!url) return;
       // keepalive so the "gone" on the way out still goes when the tab is
@@ -1292,6 +1334,54 @@
       },
 
       // Flat records rather than JSON: the reader is C++03 with no parser in it.
+      /* Locked servers.
+       *
+       * The lock is enforced by the switch, which drops datagrams for a server
+       * this socket has not opened. That is the right place for it -- being
+       * refused should cost a stranger a datagram rather than a seat -- but it
+       * means the refusal is silent, so something has to notice and ask. This
+       * is that something, and it lives in the page because the page is what
+       * has a password field.
+       *
+       * Asked on the way out of send() rather than when the player taps a row:
+       * the game does not tell the page it is joining, it just starts sending,
+       * and the first datagram to a locked route is the only reliable signal
+       * that somebody is trying to get in. */
+      needsUnlock: function (route) {
+        if (!route || opened[route]) return false;
+        for (var i = 0; i < others.length; i++)
+          if ((others[i].route >>> 0) === (route >>> 0)) return !!others[i].locked;
+        return false;
+      },
+
+      unlock: function (route) {
+        if (!url || asking[route]) return;
+        asking[route] = true;
+
+        var net = window.mcpeNet;
+        var mine = net ? net.route() : 0;
+        var token = net ? net.token() : '';
+        if (!mine || !token) { asking[route] = false; return; }
+
+        window.mcpeDialog.ask({
+          title: 'This server has a password',
+          okLabel: 'Join',
+          fields: [{ label: 'Password', value: '' }]
+        }).then(function (values) {
+          if (!values) { asking[route] = false; return; }   // cancelled: stay out
+          return fetch(url + '/unlock', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ route: mine, token: token, server: route, password: values[0] })
+          }).then(function (r) {
+            asking[route] = false;
+            // Only on success: a wrong password leaves the door shut, and the
+            // next datagram asks again rather than silently never arriving.
+            if (r.ok) opened[route] = true;
+          });
+        }).catch(function () { asking[route] = false; });
+      },
+
       records: function () {
         return others.map(function (p) {
           return (p.name || '') + '\t' + (p.world || '') + '\t' + ((p.route || 0) >>> 0);
