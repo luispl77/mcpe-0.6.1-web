@@ -47,6 +47,26 @@ Two sockets, a datagram between them, the 1400-byte case, an unknown
 destination, and the announce path — including that a tab cannot publish a route
 belonging to somebody else.
 
+## `bridge.mjs` — a dedicated server on the switch
+
+Wants the service, started with a servers file. The far end is a plain UDP echo
+socket rather than a real `mcpe_server`, because what needs checking is the
+switch and not the game: that datagrams reach the server's port, that replies
+come back stamped with the **server's** route rather than 0, that two players
+arrive on different source ports, and that a locked server stays shut until the
+right password opens it — for that socket alone.
+
+The setup is in the header of the file. The source-port check is the one worth
+keeping: it is the whole reason a socket is held per player rather than per
+server, and nothing else would notice it regressing until two people tried to
+play at once.
+
+Getting the source route wrong is not hypothetical — the first version of the
+bridge stamped replies with `undefined`, which lands as 0, which the client reads
+as "not joinable". The symptom was `onUnableToConnect` in a browser with a
+perfectly working switch underneath, and it cost far more to find from that end
+than this test costs to run.
+
 ## `browser.mjs` — two real tabs
 
 Wants the service, the built page on `:8000`, and `playwright-core` with a

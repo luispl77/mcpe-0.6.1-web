@@ -29,6 +29,7 @@
 
 const http = require('http');
 const crypto = require('crypto');
+const dgram = require('dgram');
 const fs = require('fs');
 const path = require('path');
 
@@ -75,6 +76,23 @@ const TRUST_PROXY = process.env.MCPE_LOBBY_TRUST_PROXY === '1';
 const MAX_DATAGRAM   = 4096;
 const RATE_BYTES     = Number(process.env.MCPE_RELAY_RATE || 512 * 1024);
 const MAX_SOCKETS    = Number(process.env.MCPE_RELAY_MAX || 200);
+
+/* Dedicated servers: worlds that are not anybody's tab.
+ *
+ * The file is a list of {id, name, world, host, port} and optionally
+ * {salt, passwordHash}; it is read at startup and on SIGHUP, which is what the
+ * provisioner touches after adding one. Absent or unreadable means there are no
+ * dedicated servers and everything else works exactly as before -- the same way
+ * an absent relay means no multiplayer rather than an error.
+ *
+ * Every player talking to a server needs its own UDP source port, because the
+ * game keys remote systems by address *and* port and would otherwise see one
+ * peer changing its mind. So the bridge holds a socket per (server, player)
+ * pair rather than per server. Both ceilings below exist because that number is
+ * the product of two things a stranger can influence. */
+const SERVERS_FILE   = process.env.MCPE_LOBBY_SERVERS || '';
+const MAX_BRIDGE     = Number(process.env.MCPE_BRIDGE_MAX || 400);
+const BRIDGE_IDLE_MS = Number(process.env.MCPE_BRIDGE_IDLE || 60000);
 
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 
@@ -257,7 +275,9 @@ const server = http.createServer((req, res) => {
 			repo: 'https://github.com/luispl77/mcpe-0.6.1-web',
 			carriesGameTraffic: true,
 			players: players.size,
-			connected: routes.size,
+			servers: servers.size,
+			connected: tabs(),
+			bridged: bridgeSockets,
 			ttlSeconds: Math.round(TTL_MS / 1000),
 			uptimeSeconds: Math.round((Date.now() - startedAt) / 1000)
 		});
@@ -267,6 +287,22 @@ const server = http.createServer((req, res) => {
 		sweep();
 		const now = Date.now();
 		const out = [];
+		/* Servers first, and always: they are the thing that is still there
+		 * tomorrow, and a board sorted by whoever announced last would bury them
+		 * under whoever is currently playing. `locked` and `dedicated` are extra
+		 * keys rather than a change of shape -- the client reads name, world and
+		 * route positionally and ignores the rest, so an older build still lists
+		 * them correctly and simply cannot tell them apart. */
+		for (const [route, s] of servers)
+			out.push({
+				id: s.id,
+				name: s.name,
+				world: s.world,
+				route: route,
+				age: 0,
+				dedicated: true,
+				locked: !!s.passwordHash
+			});
 		for (const [id, p] of players)
 			out.push({
 				id: id,
@@ -319,6 +355,39 @@ const server = http.createServer((req, res) => {
 				source: source,
 				seen: Date.now()
 			});
+			return send(res, 200, { ok: true });
+		});
+	}
+
+	/* Opening a locked server, for the socket that asks.
+	 *
+	 * The token is what ties the request to a relay socket -- the same pairing
+	 * /announce uses -- so unlocking is something a connection does for itself
+	 * and not something one tab can do on another's behalf. Nothing is stored
+	 * anywhere but on that connection, so it ends when the socket does.
+	 *
+	 * The attempt is charged to the socket rather than the address: behind a
+	 * phone network or a school the address is everybody, and locking them all
+	 * out because one of them is guessing is the wrong failure. */
+	if (route === '/unlock' && req.method === 'POST') {
+		return readBody(req, (body) => {
+			if (body === undefined) return send(res, 413, { error: 'body too large' });
+			if (!body) return send(res, 400, { error: 'bad json' });
+
+			const conn = routes.get(Number(body.route) & 0x00ffffff);
+			if (!conn || conn.isServer || !body.token || conn.token !== String(body.token))
+				return send(res, 403, { error: 'not your route' });
+
+			const server = servers.get(Number(body.server) & 0x00ffffff);
+			if (!server) return send(res, 404, { error: 'no such server' });
+
+			conn.tries = (conn.tries || 0) + 1;
+			if (conn.tries > 10) return send(res, 429, { error: 'too many attempts' });
+
+			if (!unlocks(server, body.password)) return send(res, 403, { error: 'wrong password' });
+
+			if (!conn.unlocked) conn.unlocked = new Set();
+			conn.unlocked.add(server.route);
 			return send(res, 200, { ok: true });
 		});
 	}
@@ -419,7 +488,12 @@ function frame(opcode, payload) {
 function drop(conn, why) {
 	if (conn.closed) return;
 	conn.closed = true;
-	if (conn.route) routes.delete(conn.route);
+	if (conn.route) {
+		// A server's route lives in the same table but outlives every tab, so it
+		// must not be swept away by one leaving.
+		if (!conn.isServer) routes.delete(conn.route);
+		releaseBridge(conn);
+	}
 	try { conn.socket.end(frame(0x8, Buffer.alloc(0))); } catch (e) { /* already gone */ }
 	try { conn.socket.destroy(); } catch (e) { /* already gone */ }
 	if (why) conn.why = why;
@@ -449,6 +523,165 @@ function routeFor(route, token) {
 	return wanted;
 }
 
+/* ---------------------------------------------------------------------------
+ * The bridge
+ *
+ * A dedicated server sits on the switch as an endpoint that is not a tab. It
+ * holds a reserved route like everybody else, so a player addresses it exactly
+ * the way they address another player and neither the game nor the page needs
+ * to know the difference. What is behind the route is a UDP socket on this box
+ * instead of a WebSocket.
+ *
+ * The reason this is one socket per (server, player) rather than one per server
+ * is the far end: RakNet keys remote systems by SystemAddress, which is address
+ * *and* port. Sharing a socket would present every player to the server as the
+ * same peer, and the second one to connect would look like the first one having
+ * a very strange time. Giving each player its own ephemeral port means the
+ * server sees them as distinct without the bridge having to forge anything --
+ * which it could not do anyway without raw sockets and root.
+ * ------------------------------------------------------------------------- */
+
+/** route -> {route, id, name, world, host, port, salt, passwordHash, peers} */
+const servers = new Map();
+let bridgeSockets = 0;
+
+/* Sockets held by tabs. Servers sit in `routes` too -- that is what lets a
+ * player address one without knowing it is not a player -- but they are not
+ * connections and must not be counted as if they were: they would inflate what
+ * the service reports as `connected`, and worse, they would eat into
+ * MAX_SOCKETS, so that registering servers quietly lowered how many people
+ * could be in a world at once. */
+function tabs() { return routes.size - servers.size; }
+
+/** Reads the servers file into `servers`, keeping routes stable across reloads. */
+function loadServers() {
+	if (!SERVERS_FILE) return;
+
+	let list;
+	try {
+		list = JSON.parse(fs.readFileSync(SERVERS_FILE, 'utf8'));
+	} catch (e) {
+		// Deliberately not fatal, and deliberately loud. A syntax error in this
+		// file must not take the board and the relay down with it: the players
+		// already in a world are not part of what broke.
+		console.error('mcpe-lobby: cannot read %s: %s', SERVERS_FILE, e.message);
+		return;
+	}
+	if (!Array.isArray(list)) return;
+
+	const byId = new Map();
+	for (const [route, s] of servers) byId.set(s.id, route);
+
+	const keep = new Set();
+	for (const entry of list) {
+		const id = clean(entry && entry.id, 40);
+		const port = Number(entry && entry.port);
+		if (!id || !(port > 0 && port < 65536)) continue;
+
+		// A restart of a server must not move it on the board, so a route is
+		// reused whenever the id is one we already had.
+		let route = byId.get(id);
+		if (!route) {
+			route = allocRoute();
+			if (!route) break;
+		}
+		const previous = servers.get(route);
+		for (const peer of (previous ? previous.peers : new Map()).values())
+			closePeer(peer);
+
+		servers.set(route, {
+			// Also carried on the record, not just the map key: the reply path
+			// stamps datagrams with it, and a source route of 0 is what the
+			// client reads as "not joinable" -- so getting this wrong does not
+			// look like a bug here, it looks like the server refusing to answer.
+			route: route,
+			id: id,
+			name: clean(entry.name, 20) || 'Server',
+			world: clean(entry.world, 20),
+			host: clean(entry.host, 60) || '127.0.0.1',
+			port: port,
+			salt: clean(entry.salt, 64) || '',
+			passwordHash: clean(entry.passwordHash, 128) || '',
+			peers: new Map()
+		});
+		routes.set(route, { isServer: true, route: route, closed: false });
+		keep.add(route);
+	}
+
+	for (const [route, s] of Array.from(servers)) {
+		if (keep.has(route)) continue;
+		for (const peer of s.peers.values()) closePeer(peer);
+		servers.delete(route);
+		routes.delete(route);
+	}
+}
+
+function closePeer(peer) {
+	if (peer.closed) return;
+	peer.closed = true;
+	bridgeSockets--;
+	clearTimeout(peer.idle);
+	try { peer.socket.close(); } catch (e) { /* already gone */ }
+}
+
+/** Whether this password opens this server. Empty hash means it is not locked. */
+function unlocks(server, password) {
+	if (!server.passwordHash) return true;
+	const given = crypto.createHash('sha256')
+		.update(server.salt + String(password === undefined ? '' : password)).digest('hex');
+	const a = Buffer.from(given, 'utf8');
+	const b = Buffer.from(server.passwordHash, 'utf8');
+	return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
+/** The socket this player talks to this server through, made on first use. */
+function peerFor(server, conn) {
+	let peer = server.peers.get(conn.route);
+	if (peer && !peer.closed) return peer;
+
+	if (bridgeSockets >= MAX_BRIDGE) return null;
+
+	const socket = dgram.createSocket('udp4');
+	peer = { socket: socket, closed: false, idle: null };
+	bridgeSockets++;
+	server.peers.set(conn.route, peer);
+
+	socket.on('message', (payload) => {
+		touch(peer);
+		if (conn.closed || payload.length > MAX_DATAGRAM) return;
+		// Source-stamped with the server's route, by the same rule that governs
+		// tab-to-tab: the receiver is told who sent it by the switch, never by
+		// the sender.
+		const out = Buffer.allocUnsafe(payload.length + 4);
+		out.writeUInt32BE(server.route, 0);
+		payload.copy(out, 4);
+		try { conn.socket.write(frame(0x2, out)); } catch (e) { drop(conn, 'write'); }
+	});
+
+	// A bridge socket failing is one player's problem, not the service's.
+	socket.on('error', () => { server.peers.delete(conn.route); closePeer(peer); });
+
+	touch(peer);
+	return peer;
+}
+
+/* Bridge sockets are cheap but not free, and the event that should close one --
+ * a player leaving -- is a tab closing, which arrives as a websocket close and
+ * not as anything RakNet says. So they also expire on their own. */
+function touch(peer) {
+	clearTimeout(peer.idle);
+	peer.idle = setTimeout(() => closePeer(peer), BRIDGE_IDLE_MS);
+	if (peer.idle.unref) peer.idle.unref();
+}
+
+/** Drops every bridge socket a departing tab was holding. */
+function releaseBridge(conn) {
+	for (const server of servers.values()) {
+		const peer = server.peers.get(conn.route);
+		if (peer) { server.peers.delete(conn.route); closePeer(peer); }
+	}
+}
+
 /* Bytes per second, per connection, counted on a rolling one-second window.
  * Over the cap the frame is dropped and the connection carries on -- a burst
  * while chunks go out is normal and should not end a game. Far over it, nothing
@@ -466,12 +699,30 @@ function deliver(conn, message) {
 	if (message.length < 4) return;
 	if (!spend(conn, message.length)) return;
 
-	const target = routes.get(message.readUInt32BE(0) & 0x00ffffff);
+	const wanted = message.readUInt32BE(0) & 0x00ffffff;
+	const target = routes.get(wanted);
 	// Silently, on purpose: a datagram for a player who has just closed their
 	// tab is the ordinary case, and RakNet is already built to time out a peer
 	// that stops answering. Telling the sender would only invent a second way
 	// for it to find out something it handles perfectly well on its own.
 	if (!target || target.closed || target === conn) return;
+
+	// A dedicated server: same route space, different thing behind it.
+	if (target.isServer) {
+		const server = servers.get(wanted);
+		if (!server) return;
+		// A locked server is locked here rather than in the game, so that being
+		// refused costs a stranger a datagram and not a seat. The unlock is per
+		// socket, so it cannot be replayed from another tab.
+		if (server.passwordHash && !(conn.unlocked && conn.unlocked.has(wanted))) return;
+		const peer = peerFor(server, conn);
+		if (!peer) return;
+		touch(peer);
+		try {
+			peer.socket.send(message.subarray(4), server.port, server.host);
+		} catch (e) { /* the next datagram will try again */ }
+		return;
+	}
 
 	const out = Buffer.allocUnsafe(message.length);
 	out.writeUInt32BE(conn.route, 0);
@@ -558,7 +809,7 @@ server.on('upgrade', (req, socket, head) => {
 		return;
 	}
 
-	if (routes.size >= MAX_SOCKETS) { socket.destroy(); return; }
+	if (tabs() >= MAX_SOCKETS) { socket.destroy(); return; }
 
 	const route = allocRoute();
 	if (!route) { socket.destroy(); return; }
@@ -631,11 +882,22 @@ setInterval(() => {
 	}
 }, 15000).unref();
 
+loadServers();
+
+/* Reload rather than restart, because a restart would take the relay with it:
+ * adding a server must not disconnect the players already in a world. The
+ * provisioner writes the file and sends this. */
+process.on('SIGHUP', () => {
+	loadServers();
+	console.log(NAME + ' reloaded servers: ' + servers.size);
+});
+
 server.listen(PORT, HOST, () => {
 	console.log(NAME + '/' + VERSION + ' listening on ' + HOST + ':' + PORT +
 	            ' (ttl ' + Math.round(TTL_MS / 1000) + 's, max ' + MAX_PLAYERS +
 	            ', relay /relay max ' + MAX_SOCKETS +
-	            ', web ' + (WEB_ROOT || 'off') + ')');
+	            ', web ' + (WEB_ROOT || 'off') +
+	            ', servers ' + (SERVERS_FILE ? servers.size : 'off') + ')');
 });
 
 // Stopping is a supported outcome, not a failure: the client treats an
@@ -644,7 +906,7 @@ server.listen(PORT, HOST, () => {
 for (const signal of ['SIGINT', 'SIGTERM'])
 	process.on(signal, () => {
 		console.log(NAME + ' stopping; ' + players.size + ' player(s) and ' +
-		            routes.size + ' relay socket(s) dropped');
+		            tabs() + ' relay socket(s) dropped');
 		// close() stops accepting but waits on established connections, and a
 		// relay socket is deliberately long-lived -- without this the service
 		// would sit there until the last player got bored.

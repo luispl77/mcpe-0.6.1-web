@@ -35,9 +35,64 @@ browser will not let an https page open a `ws://` socket or fetch `http://`.
 | Route | |
 |---|---|
 | `GET /` | what this is, how many are on it, how many sockets it holds |
-| `GET /list` | `{players: [{id, name, world, route, age}]}` |
+| `GET /list` | `{players: [{id, name, world, route, age, dedicated?, locked?}]}` |
 | `POST /announce` | `{id, name, world, route, token}`, or `{id, gone: true}` |
+| `POST /unlock` | `{route, token, server, password}` — opens a locked server |
 | `GET /relay` (upgrade) | the datagram switch |
+
+## Dedicated servers
+
+A world that is not anybody's tab. `MCPE_LOBBY_SERVERS` points at a JSON file:
+
+```json
+[{"id": "skyblock", "name": "Skyblock", "world": "creative",
+  "host": "127.0.0.1", "port": 19150,
+  "salt": "…", "passwordHash": "sha256(salt + password), hex"}]
+```
+
+It is read at startup and on **SIGHUP** — a reload rather than a restart,
+because restarting would drop every player already in a world. Absent or
+unparseable means there are no dedicated servers and everything else works as
+before, the same way an absent relay means no multiplayer rather than an error.
+
+A server holds a reserved route and sits in the switching table beside the tabs,
+so **a player addresses it exactly the way they address another player**, and
+the game does not need to know the difference — an unmodified client lists and
+joins one already. Its route is stable across reloads as long as its `id` is.
+
+What is behind the route is UDP on this box, and the bridge holds **one socket
+per (server, player)** rather than one per server. That is not thrift, it is
+correctness: the game keys remote systems by `SystemAddress`, which is address
+*and* port, so a shared socket would present every player as the same peer and
+the second one to connect would look like the first having a very strange time.
+Distinct ephemeral ports give the server distinct peers without the bridge
+forging anything — which it could not do without raw sockets and root anyway.
+
+`MCPE_BRIDGE_MAX` (400 sockets) and `MCPE_BRIDGE_IDLE` (60000 ms) bound that
+product. Idle expiry matters because the event that should close a bridge socket
+— a player leaving — arrives as a WebSocket close, and RakNet never says a word
+about it.
+
+Servers are counted separately from tabs everywhere it matters. They live in the
+routing table but they are not connections, so they do not show up in
+`connected` and do not consume `MCPE_RELAY_MAX`; registering one must not
+quietly lower how many people can be in a world.
+
+### Passwords
+
+`passwordHash` is `sha256(salt + password)` in hex, and empty means the server is
+open. The gate is **here, not in the game**: a locked server's datagrams are
+dropped by the switch until that socket has posted the right password to
+`/unlock`, so being refused costs a stranger a datagram rather than a seat, and
+0.6.1's protocol — whose `LoginPacket` carries a name and two version numbers and
+nothing else — does not have to grow a field it never had.
+
+The unlock is bound to the relay socket that asked for it, by the same token
+pairing `/announce` uses. One player knowing the password does not open the
+server for anybody else, and nothing about it survives that socket closing.
+Attempts are counted per socket rather than per address, because behind a phone
+network or a school an address is everybody and locking them all out for one
+guesser is the wrong failure.
 
 ## The switch
 
