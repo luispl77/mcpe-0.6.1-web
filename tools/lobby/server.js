@@ -882,6 +882,20 @@ setInterval(() => {
 	}
 }, 15000).unref();
 
+/* Somewhere for the thing that writes the servers file to find us, so it can
+ * ask for a reload. Only written when asked for: this service is happy to be a
+ * process nobody manages, and a stale pidfile is worse than no pidfile. */
+const PIDFILE = process.env.MCPE_LOBBY_PIDFILE || '';
+if (PIDFILE) {
+	try {
+		fs.writeFileSync(PIDFILE, String(process.pid));
+		for (const signal of ['SIGINT', 'SIGTERM'])
+			process.on(signal, () => { try { fs.unlinkSync(PIDFILE); } catch (e) { /* going down anyway */ } });
+	} catch (e) {
+		console.error('mcpe-lobby: cannot write %s: %s', PIDFILE, e.message);
+	}
+}
+
 loadServers();
 
 /* Reload rather than restart, because a restart would take the relay with it:
