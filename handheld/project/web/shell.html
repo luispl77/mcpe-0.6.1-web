@@ -13,6 +13,14 @@
 <meta name="theme-color" content="#1a1a1a">
 <title>Minecraft Pocket Edition 0.6.1</title>
 
+<!-- A grass block, as an inline SVG rather than a .png beside the page.
+     sync-from-pages.sh copies a fixed list of four files to the serving box, so
+     a fifth would be a file that exists on github.io and 404s on the LAN party
+     -- and a tab icon that is missing on exactly one deployment is worse than
+     one drawn in six rects. Sized in a 16x16 viewBox so it stays crisp at the
+     size a tab actually draws it. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' shape-rendering='crispEdges'%3E%3Crect width='16' height='16' fill='%23795548'/%3E%3Crect width='16' height='6' fill='%237CB342'/%3E%3Crect y='6' width='16' height='2' fill='%23689F38'/%3E%3Crect x='2' y='9' width='3' height='3' fill='%236D4C41'/%3E%3Crect x='9' y='11' width='4' height='3' fill='%236D4C41'/%3E%3Crect x='6' y='2' width='3' height='2' fill='%238BC34A'/%3E%3C/svg%3E">
+
 <script>
   // Which controls the game builds, decided before anything else on the page so
   // that the layout and the game agree. main_sdl.h reads this back out.
