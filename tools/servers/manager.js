@@ -101,6 +101,9 @@ const REGISTER_PER_HOUR = Number(process.env.MCPE_REGISTER_PER_HOUR || 5);
 
 const TOKEN_MS = 30 * 24 * 3600 * 1000;
 
+/** How much one world may say per second before it is quietened. */
+const LOG_LINES_PER_SEC = Number(process.env.MCPE_LOG_LINES_PER_SEC || 20);
+
 if (!BIN || !ROOT || !SERVERS_FILE) {
 	console.error('mcpe-servers: MCPE_SERVER_BIN, MCPE_SERVERS_ROOT and MCPE_SERVERS_FILE are all required');
 	process.exit(2);
@@ -288,7 +291,50 @@ function publish() {
 	}
 }
 
+/* What a world says, into the journal with its id in front of it.
+ *
+ * Both streams were resume()d -- drained and dropped on the floor. That is fine
+ * right up until somebody asks why a server feels slow, at which point there is
+ * nothing whatsoever to look at: no tick rate, no level-load timings, not even
+ * the line the binary prints when it finishes generating. A world that cannot
+ * say anything cannot be diagnosed, only guessed at.
+ *
+ * Whole lines only, and with a brake on. This is the one place in this process
+ * where something else decides how much gets written, and a server stuck in a
+ * printing loop must not fill the journal or this process's memory. */
+function relay(stream, entry) {
+	let held = '';
+	stream.setEncoding('utf8');
+	stream.on('data', (chunk) => {
+		held += chunk;
+		// A "line" longer than this is not a line; keep the tail and move on
+		// rather than growing a buffer without limit.
+		if (held.length > 8192) held = held.slice(-8192);
+
+		let nl;
+		while ((nl = held.indexOf('\n')) >= 0) {
+			const line = held.slice(0, nl).replace(/[\x00-\x08\x0b-\x1f\x7f]/g, '').trim();
+			held = held.slice(nl + 1);
+			if (!line) continue;
+
+			const now = Date.now();
+			if (now - entry.saidAt >= 1000) { entry.saidAt = now; entry.said = 0; }
+			if (++entry.said > LOG_LINES_PER_SEC) {
+				if (entry.said === LOG_LINES_PER_SEC + 1)
+					console.log('%s: (saying too much, quietening for a second)', entry.id);
+				continue;
+			}
+			console.log('%s: %s', entry.id, line);
+		}
+	});
+}
+
 function start(entry) {
+	// Before relay() below attaches, because its handlers read these and
+	// arithmetic on undefined is a brake that silently does nothing.
+	entry.said = 0;
+	entry.saidAt = Date.now();
+
 	const dir = path.join(ROOT, entry.id);
 	fs.mkdirSync(dir, { recursive: true });
 
@@ -304,8 +350,8 @@ function start(entry) {
 		'--gamemode', entry.mode === 'survival' ? 'survival' : 'creative'
 	].concat(entry.seed ? ['--seed', entry.seed] : []), { cwd: dir, stdio: ['ignore', 'pipe', 'pipe'] });
 
-	child.stdout.resume();
-	child.stderr.resume();
+	relay(child.stdout, entry);
+	relay(child.stderr, entry);
 
 	child.on('exit', (code, signal) => {
 		console.log('%s exited (code %s, signal %s)', entry.id, code, signal);
@@ -745,10 +791,46 @@ server.listen(PORT, HOST, () => {
 
 for (const signal of ['SIGINT', 'SIGTERM'])
 	process.on(signal, () => {
+		if (leaving) return;
 		leaving = true;   // before any stop(), or the record goes with them
-		console.log(NAME + ' stopping; ' + running.size + ' world(s) going down with it');
+
+		const children = Array.from(running.values());
+		console.log(NAME + ' stopping; ' + children.length + ' world(s) going down with it');
 		// Children are ours, so they go when we do -- but cleanly, so the levels
 		// are saved rather than lost.
-		for (const entry of Array.from(running.values())) stop(entry);
-		setTimeout(() => process.exit(0), 1500);
+		for (const entry of children) stop(entry);
+
+		/* Wait for them to actually be gone.
+		 *
+		 * This used to count to 1500ms and exit. A world saves a 21 MB
+		 * chunks.dat on the way down and does not always manage it in a second
+		 * and a half, and exiting first hands the rest to systemd's SIGKILL --
+		 * so the save that the SIGINT above exists to allow was being cut off
+		 * by the very thing that sent it. Waiting is not a courtesy here; it is
+		 * the whole point of stopping them one at a time.
+		 *
+		 * Bounded, because a world that will not go down must not wedge a
+		 * restart. TimeoutStopSec is 30s and SendSIGKILL sweeps up after it, so
+		 * this stays well inside that and lets systemd be the backstop. */
+		let pending = 0;
+		let done = false;
+		const leave = () => { if (done) return; done = true; process.exit(0); };
+
+		for (const entry of children) {
+			if (!entry.child || entry.child.exitCode !== null || entry.child.signalCode !== null)
+				continue;
+			pending++;
+			entry.child.once('exit', () => {
+				if (--pending === 0) {
+					console.log('all worlds saved and stopped');
+					leave();
+				}
+			});
+		}
+
+		if (!pending) return leave();
+		setTimeout(() => {
+			console.log('gave up waiting for ' + pending + ' world(s)');
+			leave();
+		}, 20000);
 	});

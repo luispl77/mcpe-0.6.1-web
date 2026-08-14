@@ -58,10 +58,22 @@ LockPersonality=yes
 # backstop for when that knob is wrong.
 MemoryMax=768M
 
-# Killing only the main process would leave the worlds orphaned and holding
-# their ports. The manager stops them itself on SIGTERM, cleanly, so that they
-# save; this is what happens if that does not finish in time.
-KillMode=control-group
+# SIGTERM to the manager and to nothing else, because the manager is the only
+# thing here that knows how to stop a world properly.
+#
+# This said control-group, which is what the comment above it described and the
+# opposite of what it did: systemd sent SIGTERM to *every* process in the cgroup
+# at once, so all four worlds died where they stood before the manager's own
+# handler had run a line. main_dedicated traps SIGINT and saves; it does not
+# trap SIGTERM, whose default disposition is to die immediately. So every
+# `systemctl restart mcpe-servers` -- every deploy -- threw away whatever had
+# not already reached the disk. The journal said so out loud and nobody read it:
+# `exited (code null, signal SIGTERM)`.
+#
+# mixed is the shape the comment always meant. Nothing is orphaned by it: the
+# children are the manager's own, it SIGINTs each one and now waits for them,
+# and SendSIGKILL still sweeps up anything left after TimeoutStopSec.
+KillMode=mixed
 TimeoutStopSec=30
 
 [Install]
