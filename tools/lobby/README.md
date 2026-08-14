@@ -176,6 +176,34 @@ the service answers `404`, which looks exactly like a proxy that is eating the
 upgrade. `--max-time` matters too: a real `101` holds the socket open, so the
 success case is a timeout with `101` already printed.
 
+### The CDN must not outlive a deploy
+
+The service sends `Cache-Control: no-cache` for every file it serves, and it
+means it: `sync-from-pages.sh` replaces all four in place under the same names,
+so a browser holding an old one has no way to notice.
+
+A CDN in front can quietly override that, and it will not override it evenly.
+Cloudflare's zone **Browser Cache TTL** applies to responses it considers
+cacheable, which is decided by file extension: `.js` is on that list, `.data` and
+`.wasm` are not. On 2026-08-14 that meant a returning player revalidated the data
+package and reused a four-hour-old `minecraftpe.js`, and Emscripten's loader
+**hangs at `Downloading data... (N/N)`** when the two are from different builds —
+the package arrives, the runtime never starts, and nothing in the console says
+why. It looks exactly like a broken build and is not one.
+
+The zone now carries a cache rule scoped to `mcpe.continualmi.com` setting
+browser TTL to *respect origin*, which is the only setting under which the
+`no-cache` above is true. Check it after any CDN change:
+
+```sh
+for f in minecraftpe.js minecraftpe.data; do
+    curl -sI https://host/$f | grep -i '^cache-control'
+done
+```
+
+**Both must say the same thing.** If they disagree, the deployment can hand out
+half of one build and half of another, and the symptom will not point here.
+
 `MCPE_LOBBY_TRUST_PROXY=1` makes it believe `X-Forwarded-For`. Leave it **off**
 unless something we control is in front, because the header is client-supplied
 and trusting it on a directly-reachable service lets anyone forge a source.
