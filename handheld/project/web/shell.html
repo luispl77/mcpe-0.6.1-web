@@ -900,7 +900,8 @@
           caption.textContent = f.label;
 
           var input = document.createElement('input');
-          input.type = 'text';
+          // A password at a LAN party is read over a shoulder, not intercepted.
+          input.type = f.password ? 'password' : 'text';
           input.value = f.value || '';
           input.spellcheck = false;
           input.autocapitalize = 'off';
@@ -1366,7 +1367,7 @@
         window.mcpeDialog.ask({
           title: 'This server has a password',
           okLabel: 'Join',
-          fields: [{ label: 'Password', value: '' }]
+          fields: [{ label: 'Password', value: '', password: true }]
         }).then(function (values) {
           if (!values) { asking[route] = false; return; }   // cancelled: stay out
           return fetch(url + '/unlock', {

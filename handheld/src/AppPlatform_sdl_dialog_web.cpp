@@ -23,17 +23,23 @@
     having answered yet was always a state they sat in quite happily -- it simply
     never lasted longer than one frame before. */
 
-/// Opens the overlay. A field whose label is empty is not shown.
+/** Opens the overlay. A field whose label is empty is not shown.
+
+    `mask` is a bitmask of the fields that should be typed into blind -- bit 0
+    for the first, bit 1 for the second. A bitmask rather than another pair of
+    parameters because this signature is already at the edge of what is readable
+    for two fields, and nothing here has ever wanted three. */
 EM_JS(void, mcpe_dialog_open, (const char* title, const char* okLabel,
                                const char* label0, const char* value0,
-                               const char* label1, const char* value1), {
+                               const char* label1, const char* value1,
+                               int mask), {
 	if (!window.mcpeDialog) return;
 	window.mcpeDialog.open({
 		title:   UTF8ToString(title),
 		okLabel: UTF8ToString(okLabel),
 		fields: [
-			{ label: UTF8ToString(label0), value: UTF8ToString(value0) },
-			{ label: UTF8ToString(label1), value: UTF8ToString(value1) }
+			{ label: UTF8ToString(label0), value: UTF8ToString(value0), password: (mask & 1) !== 0 },
+			{ label: UTF8ToString(label1), value: UTF8ToString(value1), password: (mask & 2) !== 0 }
 		].filter(function (f) { return f.label !== ''; })
 	});
 });
@@ -82,12 +88,12 @@ void AppPlatform_sdl::showDialog(int dialogId)
 		_dialogFields = 2;
 		mcpe_dialog_open("Create world", "Create",
 		                 "World name", "World",
-		                 "Seed (blank for random)", "");
+		                 "Seed (blank for random)", "", 0);
 		break;
 
 	case DialogDefinitions::DIALOG_RENAME_MP_WORLD:
 		_dialogFields = 1;
-		mcpe_dialog_open("Rename world", "Rename", "New name", "", "", "");
+		mcpe_dialog_open("Rename world", "Rename", "New name", "", "", "", 0);
 		break;
 
 	case DialogDefinitions::DIALOG_CREATE_SERVER:
@@ -96,12 +102,12 @@ void AppPlatform_sdl::showDialog(int dialogId)
 		_dialogFields = 2;
 		mcpe_dialog_open("New server", "Create",
 		                 "Server name", "",
-		                 "Password (blank for none)", "");
+		                 "Password (blank for none)", "", 2);
 		break;
 
 	case DialogDefinitions::DIALOG_NEW_CHAT_MESSAGE:
 		_dialogFields = 1;
-		mcpe_dialog_open("Chat", "Send", "Message", "", "", "");
+		mcpe_dialog_open("Chat", "Send", "Message", "", "", "", 0);
 		break;
 
 	default:
