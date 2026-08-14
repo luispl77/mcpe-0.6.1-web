@@ -155,6 +155,10 @@ void ServerSideNetworkHandler::onDisconnect(const RakNet::RakNetGUID& guid)
 			message += " disconnected from the game";
 			displayGameMessage(message);
 
+			// While we still have them. Two lines further down the entity is
+			// removed from the level and there is nothing left to write.
+			level->savePlayerData(player);
+
 			//RemoveEntityPacket packet(player->entityId);
 			//raknetInstance->send(packet);
 			player->reallyRemoveIfPlayer = true;
@@ -200,6 +204,20 @@ void ServerSideNetworkHandler::handle(const RakNet::RakNetGUID& source, LoginPac
 	newPlayer->owner = source;
 	newPlayer->name = packet->clientName.C_String();
 	_pendingPlayers.push_back(newPlayer);
+
+	/* Where they left off, if this world has ever seen them.
+	 *
+	 * A ServerPlayer is constructed at the world spawn and, until now, stayed
+	 * there: nothing on this path ever looked anything up, so every join was a
+	 * first join. False here means exactly that -- nobody by this name has
+	 * saved in this world -- and the spawn position it was already given
+	 * stands.
+	 *
+	 * Before the nudge below on purpose. That loop only moves somebody who
+	 * would be standing inside a solid block, which is worth keeping for a
+	 * restored position too: a world can change under you while you are away,
+	 * and being lifted out of new stone beats suffocating in it. */
+	level->loadPlayerData(newPlayer);
 
 	// Reset the player so he doesn't spawn inside blocks
 	while (newPlayer->y > 0) {
