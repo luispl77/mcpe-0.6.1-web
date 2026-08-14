@@ -45,6 +45,11 @@ public:
 	int getUserInputStatus();
 	StringVector getUserInput();
 
+	/// Dedicated worlds, when the page has been given a manager to talk to.
+	bool canCreateServers();
+	void createServer(const std::string& name, const std::string& password);
+	int  createServerStatus();
+
 	BinaryBlob readAssetFile(const std::string& filename);
 	TextureData loadTexture(const std::string& filename_, bool textureFolder);
 	void saveScreenshot(const std::string& filename, int glWidth, int glHeight);

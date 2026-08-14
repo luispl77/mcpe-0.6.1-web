@@ -1301,6 +1301,67 @@
   })();
   </script>
 
+  <script>
+  // ---------------------------------------------------------------------------
+  // Making a world that is nobody's tab.
+  //
+  // SERVERS_URL sits beside LOBBY_URL and RELAY_URL and for the same reason:
+  // which services a deployment talks to is a property of where it is deployed,
+  // not of the build. Empty is the off switch and the default -- the game asks
+  // canCreateServers() before it draws the button, so github.io simply does not
+  // have one, and there is no second wasm and no compile flag anywhere in it.
+  //
+  // ?servers=<url> points a local build at a local manager, matching ?lobby=
+  // and ?relay=.
+  // ---------------------------------------------------------------------------
+  (function () {
+    var SERVERS_URL = '';
+
+    var url = new URLSearchParams(location.search).get('servers');
+    if (url === null) url = SERVERS_URL;
+    url = (url || '').replace(/\/+$/, '');
+
+    // The USERINPUT convention the dialogs already use, because the C++ side
+    // polls this exactly the way it polls those: -2 is "still going".
+    var NOTINITED = -2, CANCEL = 0, OK = 1;
+    var status = NOTINITED;
+    var last = null;
+
+    window.mcpeServers = {
+      enabled: function () { return !!url; },
+
+      create: function (name, password) {
+        if (!url) { status = CANCEL; return; }
+        status = NOTINITED;
+        last = null;
+        fetch(url + '/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: name || 'World', password: password || '' })
+        }).then(function (r) {
+          return r.ok ? r.json() : null;
+        }).then(function (body) {
+          last = body;
+          status = body ? OK : CANCEL;
+        }).catch(function () {
+          // An unreachable manager is a refusal, not an exception: the screen
+          // says it could not and the player is still looking at the list.
+          status = CANCEL;
+        });
+      },
+
+      // Reporting the answer consumes it, matching mcpeDialog.status().
+      status: function () {
+        var s = status;
+        if (s !== NOTINITED) status = NOTINITED;
+        return s;
+      },
+
+      created: function () { return last; }
+    };
+  })();
+  </script>
+
   {{{ SCRIPT }}}
 </body>
 </html>

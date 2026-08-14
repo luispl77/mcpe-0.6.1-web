@@ -1,13 +1,17 @@
 #include "JoinGameScreen.h"
 #include "StartMenuScreen.h"
 #include "ProgressScreen.h"
+#include "DialogDefinitions.h"
 #include "../Font.h"
 #include "../../../network/RakNetInstance.h"
 
 JoinGameScreen::JoinGameScreen()
 :	bJoin(  2, "Join Game"),
 	bBack(  3, "Back"),
-	gamesList(NULL)
+	bCreate(4, "New Server"),
+	gamesList(NULL),
+	_canCreate(false),
+	_creating(CREATE_IDLE)
 {
 	bJoin.active = false;
 	//gamesList->yInertia = 0.5f;
@@ -35,6 +39,15 @@ void JoinGameScreen::buttonClicked(Button* button)
 		//minecraft->locateMultiplayer();
 		//minecraft->setScreen(new JoinGameScreen());
 	}
+	if (button->id == bCreate.id && _creating == CREATE_IDLE)
+	{
+		/* The name and password are collected by the platform, not by a text
+		 * field of our own: 0.6.1's GUI has no password field and the platform
+		 * already owns every other piece of text entry in the game. */
+		_createError.clear();
+		_creating = CREATE_ASKING;
+		minecraft->platform()->createUserInput(DialogDefinitions::DIALOG_CREATE_SERVER);
+	}
 	if (button->id == bBack.id)
 	{
 		minecraft->cancelLocateMultiplayer();
@@ -60,6 +73,39 @@ bool JoinGameScreen::isIndexValid( int index )
 
 void JoinGameScreen::tick()
 {
+	/* Two waits, one after the other, and neither of them blocks a frame: the
+	 * player answering the dialog, then the manager answering the request. Both
+	 * report USERINPUT_NOTINITED until they have something to say, so sitting
+	 * here doing nothing is the ordinary state and not a stall. */
+	if (_creating == CREATE_ASKING) {
+		// 1 is OK and 0 is Cancel, the same bare values every other screen here
+		// tests -- the named constants live on the SDL platform header, and a
+		// screen that also builds for Android and win32 should not reach for it.
+		const int status = minecraft->platform()->getUserInputStatus();
+		if (status > -1) {
+			if (status == 1) {
+				const std::vector<std::string> answer = minecraft->platform()->getUserInput();
+				const std::string name     = answer.size() > 0 ? answer[0] : std::string();
+				const std::string password = answer.size() > 1 ? answer[1] : std::string();
+				minecraft->platform()->createServer(name, password);
+				_creating = CREATE_SENDING;
+			} else {
+				_creating = CREATE_IDLE;
+			}
+		}
+	} else if (_creating == CREATE_SENDING) {
+		const int status = minecraft->platform()->createServerStatus();
+		if (status > -1) {
+			// Nothing to do on success: the world announces itself to the board
+			// and arrives in the list the same way everybody else's does.
+			if (status != 1)
+				_createError = "Could not create the server";
+			_creating = CREATE_IDLE;
+		}
+	}
+
+	bCreate.active = _canCreate && _creating == CREATE_IDLE;
+
 	const ServerList& orgServerList = minecraft->raknetInstance->getServerList();
 	ServerList serverList;
 	for (unsigned int i = 0; i < orgServerList.size(); ++i)
@@ -108,6 +154,13 @@ void JoinGameScreen::init()
 	buttons.push_back(&bJoin);
 	buttons.push_back(&bBack);
 
+	/* Absent rather than greyed out where there is nowhere to make one. On
+	 * github.io there is no manager, so this is not a disabled button the
+	 * player can wonder about -- it is a screen that looks exactly like it did
+	 * before any of this existed. */
+	_canCreate = minecraft->platform()->canCreateServers();
+	if (_canCreate) buttons.push_back(&bCreate);
+
 	minecraft->raknetInstance->clearServerList();
 	gamesList = new AvailableGamesList(minecraft, width, height);
 
@@ -130,6 +183,13 @@ void JoinGameScreen::setupPositions() {
 	// Center buttons
 	bJoin.x = width / 2 - 4 - bJoin.width;
 	bBack.x = width / 2 + 4;
+
+	/* Above the other two rather than beside them: the row is already two
+	 * 120-wide buttons on a 480-wide phone, and a third would either overlap
+	 * or push Join somewhere the thumb does not expect it. */
+	bCreate.width = 120;
+	bCreate.x = width / 2 - bCreate.width / 2;
+	bCreate.y = yBase - 24;
 }
 
 void JoinGameScreen::render( int xm, int ym, float a )
@@ -157,6 +217,15 @@ void JoinGameScreen::render( int xm, int ym, float a )
 		static const char* spinnerTexts[] = {"-", "\\", "|", "/"};
 		int n = ((int)(5.5f * getTimeS()) % 4);
 		drawCenteredString(minecraft->font, spinnerTexts[n], spinnerX, 8, 0xffffffff);
+
+		/* Said here rather than on a screen of its own. Making a world takes a
+		 * moment on the far side and the player is already looking at the list
+		 * it will appear in, so the honest thing is a line above it rather than
+		 * a modal that has to be dismissed before they can see the result. */
+		if (_creating == CREATE_SENDING)
+			drawCenteredString(minecraft->font, "Creating server...", width / 2, height - 46, 0xffffffff);
+		else if (!_createError.empty())
+			drawCenteredString(minecraft->font, _createError, width / 2, height - 46, 0xffff5555);
 	} else {
 		std::string s = "WiFi is disabled";
 		const int yy = height / 2 - 8;

@@ -93,6 +93,22 @@ public:
 	virtual int getUserInputStatus() { return 0; }
 	virtual StringVector getUserInput() { return StringVector(); }
 
+	/** Dedicated worlds, on deployments that have somewhere to put one.
+
+	    False everywhere except a web build whose page has been given a manager
+	    to talk to, which is what keeps the button off github.io without a
+	    second build: the page decides, the same way it decides whether there is
+	    a lobby or a relay at all. Asking here rather than testing for a URL
+	    keeps the screen free of anything web-shaped.
+
+	    createServer() is fire-and-poll for the same reason the dialogs are: the
+	    answer comes back over the network whenever it comes back, and a screen
+	    that polls is a screen that never blocks a frame. Status follows the
+	    USERINPUT convention -- NOTINITED while it is still going. */
+	virtual bool canCreateServers() { return false; }
+	virtual void createServer(const std::string& name, const std::string& password) {}
+	virtual int  createServerStatus() { return 0; }
+
 	virtual std::string getDateString(int s) { return ""; }
 	//virtual void createUserInputScreen(const char* types) {}
 

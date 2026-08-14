@@ -90,6 +90,15 @@ void AppPlatform_sdl::showDialog(int dialogId)
 		mcpe_dialog_open("Rename world", "Rename", "New name", "", "", "");
 		break;
 
+	case DialogDefinitions::DIALOG_CREATE_SERVER:
+		// A password is a real password field in the page rather than a second
+		// popup, which is the whole reason this stopped being window.prompt.
+		_dialogFields = 2;
+		mcpe_dialog_open("New server", "Create",
+		                 "Server name", "",
+		                 "Password (blank for none)", "");
+		break;
+
 	case DialogDefinitions::DIALOG_NEW_CHAT_MESSAGE:
 		_dialogFields = 1;
 		mcpe_dialog_open("Chat", "Send", "Message", "", "", "");
@@ -130,4 +139,42 @@ int AppPlatform_sdl::getUserInputStatus()
 StringVector AppPlatform_sdl::getUserInput()
 {
 	return _userInput;
+}
+
+/* ---------------------------------------------------------------------------
+ * Dedicated worlds
+ *
+ * The page holds the manager's URL for the same reason it holds LOBBY_URL and
+ * RELAY_URL: which service a deployment talks to is a property of where it is
+ * deployed, not of the build. github.io leaves it empty, window.mcpeServers is
+ * never defined there, and the button this feeds simply is not on the screen --
+ * one wasm, two deployments, no compile flag.
+ * ------------------------------------------------------------------------- */
+
+EM_JS(int, mcpe_servers_enabled, (), {
+	return (window.mcpeServers && window.mcpeServers.enabled()) ? 1 : 0;
+});
+
+EM_JS(void, mcpe_servers_create, (const char* name, const char* password), {
+	if (window.mcpeServers) window.mcpeServers.create(UTF8ToString(name), UTF8ToString(password));
+});
+
+/// USERINPUT_NOTINITED while the request is in flight, then OK or CANCEL.
+EM_JS(int, mcpe_servers_status, (), {
+	return window.mcpeServers ? window.mcpeServers.status() : 0;
+});
+
+bool AppPlatform_sdl::canCreateServers()
+{
+	return mcpe_servers_enabled() != 0;
+}
+
+void AppPlatform_sdl::createServer(const std::string& name, const std::string& password)
+{
+	mcpe_servers_create(name.c_str(), password.c_str());
+}
+
+int AppPlatform_sdl::createServerStatus()
+{
+	return mcpe_servers_status();
 }
