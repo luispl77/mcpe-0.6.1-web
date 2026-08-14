@@ -58,10 +58,40 @@ cmake --build build -j8
 cd build && python3 -m http.server 8000   # http, not file://
 ```
 
-emsdk is **not installed on the dev box**, so in practice CI is the compile
-check: push, dispatch, and read the run. If you do install it, the box is shared
-and has been OOM-killed by overlapping heavy jobs before — run the build through
+emsdk **is** installed on the dev box now, at `~/emsdk` (this file used to say it
+was not, and CI was the compile check). The box is shared and has been OOM-killed
+by overlapping heavy jobs before, so run both steps through
 `/home/dev/continualmi/infra/watch/heavy.sh`.
+
+`file(GLOB_RECURSE)` is evaluated at configure time, so **a new source file needs
+a re-run of `emcmake cmake`**, not just `cmake --build`. The symptom is an
+undefined symbol for a class you just added.
+
+### Checking a change without a full build
+
+A screen usually breaks in one of two ways, and neither needs three minutes:
+
+```sh
+# Does it parse? Native g++, no emsdk. The game includes <gl/glew.h> and
+# <gl/GL.h> Windows-style, so point it at a directory holding two one-line
+# shims that include <GL/glew.h> and <GL/gl.h>. Needs libgl-dev, libegl-dev.
+g++ -fsyntax-only -w -DMC_WASM -DMC_SDL2 -DMC_DATA_DIR='"/data"' \
+    -I handheld/src -I handheld/project/lib_projects/raknet/jni/RaknetSources \
+    -I <shim-dir> handheld/src/client/gui/screens/YourScreen.cpp
+```
+
+Does it *work*? Drive the built page with Playwright and read the screenshots —
+a GUI layout is one of the things that cannot be checked by reading it, because
+the coordinate space is ~320×180 on desktop web and ~342×192 on touch. Two
+traps: entry to the game is behind `#playBtn` on the touch layout, and
+`page.touchscreen.tap` is instantaneous where the game samples the pointer
+across frames, so use CDP `Input.dispatchTouchEvent` with a ~260 ms hold.
+
+The board and the services can be stubbed rather than run. `window.mcpeLobby` is
+a plain object the wasm calls into, so replacing it after load puts any server
+list you like on the screen — `name \t world \t route \t flags`, flags bit 0
+dedicated and bit 1 locked. `?servers=`, `?lobby=` and `?relay=` point a local
+build at local services.
 
 ## Two deployments, one build
 
