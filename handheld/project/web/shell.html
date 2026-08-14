@@ -1402,6 +1402,38 @@
 
   <script>
   // ---------------------------------------------------------------------------
+  // Shortcuts the game is not allowed to eat.
+  //
+  // SDL installs document-level key handlers when the module loads and calls
+  // preventDefault on what it takes, which is how W and S move you instead of
+  // scrolling the page. It cannot tell Ctrl+R from R, so reloading the tab
+  // stopped working the moment the canvas had focus -- and reloading is exactly
+  // what a player needs after a deploy.
+  //
+  // Capture phase and registered here, which is before the module loads, so
+  // this sees the key first. stopImmediatePropagation and *not* preventDefault:
+  // the game never learns about it, and the browser still does what it always
+  // did. That is the same trick the dialog below uses to own the keyboard while
+  // it is up, for the same reason.
+  // ---------------------------------------------------------------------------
+  (function () {
+    function isBrowserShortcut(e) {
+      if (e.key === 'F5') return true;
+      // Ctrl+R and Ctrl+Shift+R, and their Mac spelling.
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'r' || e.key === 'R')) return true;
+      return false;
+    }
+
+    ['keydown', 'keyup', 'keypress'].forEach(function (name) {
+      document.addEventListener(name, function (e) {
+        if (isBrowserShortcut(e)) e.stopImmediatePropagation();
+      }, true);
+    });
+  })();
+  </script>
+
+  <script>
+  // ---------------------------------------------------------------------------
   // Making a world that is nobody's tab.
   //
   // SERVERS_URL sits beside LOBBY_URL and RELAY_URL and for the same reason:
