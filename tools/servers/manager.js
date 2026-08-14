@@ -313,6 +313,46 @@ setInterval(() => {
 		}
 }, SWEEP_MS).unref();
 
+/* What was running when this last stopped.
+ *
+ * The servers file is this process's own record as much as it is the lobby's
+ * input, so starting up means reading it back and putting the worlds it names
+ * back on their ports. Without this a restart of the manager is indistinguishable
+ * from every world being deleted -- the children die with it either way, but
+ * only this decides whether they come back.
+ *
+ * Ids and ports are taken from the file rather than reallocated, so a world
+ * keeps its place on the board and its directory across a restart. */
+function restore() {
+	let list;
+	try {
+		list = JSON.parse(fs.readFileSync(SERVERS_FILE, 'utf8'));
+	} catch (e) {
+		return;   // nothing was running, or nothing readable. Either way: start empty.
+	}
+	if (!Array.isArray(list)) return;
+
+	for (const entry of list) {
+		const id = typeof entry.id === 'string' ? entry.id.replace(/[^a-z0-9-]/g, '') : '';
+		const port = Number(entry.port);
+		if (!id || !(port >= PORT_FIRST && port <= PORT_LAST)) continue;
+		if (running.size >= MAX_SERVERS || running.has(id)) continue;
+
+		const restored = {
+			id: id,
+			name: cleanName(entry.name) || 'World',
+			world: cleanName(entry.world) || 'dedicated',
+			port: port,
+			salt: typeof entry.salt === 'string' ? entry.salt : '',
+			passwordHash: typeof entry.passwordHash === 'string' ? entry.passwordHash : ''
+		};
+		running.set(id, restored);
+		try { start(restored); } catch (e) { running.delete(id); }
+	}
+	if (running.size) console.log('restored %d world(s)', running.size);
+}
+
+restore();
 publish();
 server.listen(PORT, HOST, () => {
 	console.log(NAME + '/' + VERSION + ' listening on ' + HOST + ':' + PORT +

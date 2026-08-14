@@ -1,6 +1,7 @@
 #include "TouchJoinGameScreen.h"
 #include "../StartMenuScreen.h"
 #include "../ProgressScreen.h"
+#include "../DialogDefinitions.h"
 #include "../../Font.h"
 #include "../../../Minecraft.h"
 #include "../../../renderer/Textures.h"
@@ -73,8 +74,11 @@ void AvailableGamesList::renderItem( int i, int x, int y, int h, Tesselator& t )
 JoinGameScreen::JoinGameScreen()
 :	bJoin(  2, "Join Game"),
 	bBack(  3, "Back"),
+	bCreate(4, "New Server"),
 	bHeader(0, ""),
-	gamesList(NULL)
+	gamesList(NULL),
+	_canCreate(false),
+	_creating(CREATE_IDLE)
 {
 	bJoin.active = false;
 	//gamesList->yInertia = 0.5f;
@@ -89,6 +93,14 @@ void JoinGameScreen::init()
 {
 	//buttons.push_back(&bJoin);
 	buttons.push_back(&bBack);
+
+	/* Top right, where Select world already keeps Create new -- making a world
+	 * and making a server should not be in two different places on the screen.
+	 * Absent rather than greyed out where there is nowhere to make one, so
+	 * github.io's Join card looks exactly as it did before any of this. */
+	_canCreate = minecraft->platform()->canCreateServers();
+	if (_canCreate) buttons.push_back(&bCreate);
+
 	buttons.push_back(&bHeader);
 
 	minecraft->raknetInstance->clearServerList();
@@ -106,14 +118,19 @@ void JoinGameScreen::setupPositions() {
 	//#ifdef ANDROID
 	bJoin.y =	0;
 	bBack.y =   0;
+	bCreate.y = 0;
 	bHeader.y = 0;
 	//#endif
 
 	// Center buttons
 	//bJoin.x = width / 2 - 4 - bJoin.w;
 	bBack.x = 0;//width / 2 + 4;
+	bCreate.x = width - bCreate.width;
 	bHeader.x = bBack.width;
-	bHeader.width = width - bHeader.x;
+	// The header fills whatever the two buttons leave, which is not the same
+	// width on both deployments -- there is no New Server button where there is
+	// nowhere to make one.
+	bHeader.width = width - bHeader.x - (_canCreate ? bCreate.width : 0);
 }
 
 void JoinGameScreen::buttonClicked(Button* button)
@@ -132,6 +149,17 @@ void JoinGameScreen::buttonClicked(Button* button)
 		}
 		//minecraft->locateMultiplayer();
 		//minecraft->setScreen(new JoinGameScreen());
+	}
+	if (button->id == bCreate.id && _creating == CREATE_IDLE)
+	{
+		/* Collected by the platform rather than by a text field of our own:
+		 * 0.6.1's GUI has no password field, the platform already owns every
+		 * other piece of text entry in the game, and on the web that dialog is
+		 * an overlay in the page -- so the password can be a real password
+		 * input instead of a second popup. */
+		_createError.clear();
+		_creating = CREATE_ASKING;
+		minecraft->platform()->createUserInput(DialogDefinitions::DIALOG_CREATE_SERVER);
 	}
 	if (button->id == bBack.id)
 	{
@@ -158,6 +186,43 @@ bool JoinGameScreen::isIndexValid( int index )
 
 void JoinGameScreen::tick()
 {
+	/* Two waits, one after the other, and neither blocks a frame: the player
+	 * answering the dialog, then the manager answering the request. Both report
+	 * NOTINITED (-2) until they have something to say, so sitting here doing
+	 * nothing is the ordinary state rather than a stall.
+	 *
+	 * Before the join check below, because a tap that lands on the list while a
+	 * dialog is up should not also start joining something. */
+	if (_creating == CREATE_ASKING) {
+		// 1 is OK and 0 is Cancel, the bare values every other screen here tests.
+		const int status = minecraft->platform()->getUserInputStatus();
+		if (status > -1) {
+			if (status == 1) {
+				const std::vector<std::string> answer = minecraft->platform()->getUserInput();
+				const std::string name     = answer.size() > 0 ? answer[0] : std::string();
+				const std::string password = answer.size() > 1 ? answer[1] : std::string();
+				minecraft->platform()->createServer(name, password);
+				_creating = CREATE_SENDING;
+			} else {
+				_creating = CREATE_IDLE;
+			}
+		}
+		return;
+	}
+	if (_creating == CREATE_SENDING) {
+		const int status = minecraft->platform()->createServerStatus();
+		if (status > -1) {
+			// Nothing to do on success: the world announces itself to the board
+			// and arrives in this list the way everybody else's does.
+			if (status != 1)
+				_createError = "Could not create the server";
+			_creating = CREATE_IDLE;
+		}
+		return;
+	}
+
+	bCreate.active = _canCreate;
+
 	if (isIndexValid(gamesList->selectedItem)) {
 		buttonClicked(&bJoin);
 		return;
@@ -239,6 +304,15 @@ void JoinGameScreen::render( int xm, int ym, float a )
 		static const char* spinnerTexts[] = {"-", "\\", "|", "/"};
 		int n = ((int)(5.5f * getTimeS()) % 4);
 		drawCenteredString(minecraft->font, spinnerTexts[n], spinnerX, 8, 0xffffffff);
+
+		/* Under the title bar rather than on a screen of its own. Making a world
+		 * takes a moment on the far side and the player is already looking at
+		 * the list it will appear in, so a line here beats a modal they would
+		 * have to dismiss before they could see the result. */
+		if (_creating == CREATE_SENDING)
+			drawCenteredString(minecraft->font, "Creating server...", width / 2, 30, 0xffffffff);
+		else if (!_createError.empty())
+			drawCenteredString(minecraft->font, _createError, width / 2, 30, 0xffff5555);
 	} else {
 		drawCenteredString(minecraft->font, "WiFi is disabled", baseX, 8, 0xffffffff);
 	}
