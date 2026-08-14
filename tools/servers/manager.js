@@ -117,7 +117,19 @@ function freePort() {
  * this process is the only writer and a partial file is worse than a late one:
  * the lobby treats an unparseable file as "no dedicated servers", which would
  * take every running world off the board at once. */
+/* Set once this process is on its way out.
+ *
+ * The servers file is two things at once -- what the lobby reads, and this
+ * process's own record of what should be running -- and on shutdown those two
+ * disagree. Every world is stopped, so `running` empties, so publishing would
+ * write [] over the record and restore() would find nothing to bring back: a
+ * clean `systemctl stop` would silently deregister every world on the box.
+ * Nothing is deleted by that -- the directories stay -- but a world you cannot
+ * see and cannot join is gone as far as anyone playing is concerned. */
+let leaving = false;
+
 function publish() {
+	if (leaving) return;
 	const list = [];
 	for (const s of running.values())
 		list.push({
@@ -362,6 +374,7 @@ server.listen(PORT, HOST, () => {
 
 for (const signal of ['SIGINT', 'SIGTERM'])
 	process.on(signal, () => {
+		leaving = true;   // before any stop(), or the record goes with them
 		console.log(NAME + ' stopping; ' + running.size + ' world(s) going down with it');
 		// Children are ours, so they go when we do -- but cleanly, so the levels
 		// are saved rather than lost.
