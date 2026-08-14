@@ -40,6 +40,7 @@ int main(int numArguments, char* pszArgs[]) {
 		printf("--help - Shows this message.\n");
 		printf("--port - The port to run the server on. [default: %d]\n", defaultSettings.getPort());
 		printf("--gamemode - survival or creative. [default: creative]\n");
+		printf("--seed - world seed, blank for one from the clock.\n");
 		printf("--serverkey - The key that the server should use for API calls. [default: \"%s\"]\n", defaultSettings.getServerKey().c_str());
 		printf("-------------------------------------------------------\n");
 		return 0;
@@ -57,7 +58,11 @@ int main(int numArguments, char* pszArgs[]) {
 	// Creative unless asked otherwise, which is what this always did -- but it is
 	// now a choice the caller makes rather than one compiled in, because a
 	// dedicated world people actually play on is usually meant to be survival.
-	LevelSettings settings(getEpochTimeS(),
+	// A seed given on the command line, or the clock. atoll rather than atoi: a
+	// Minecraft seed is a 64-bit number and truncating it silently would hand
+	// back a different world than the one that was asked for.
+	const long long givenSeed = aSettings.getSeed().empty() ? 0 : atoll(aSettings.getSeed().c_str());
+	LevelSettings settings(givenSeed ? givenSeed : getEpochTimeS(),
 	                       aSettings.getGameType() == 0 ? GameType::Survival : GameType::Creative);
 	float startTime = getTimeS();
 	((MAIN_CLASS*)g_app)->selectLevel(aSettings.getLevelDir(), aSettings.getLevelName(),  settings);

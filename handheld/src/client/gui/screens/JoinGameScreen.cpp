@@ -86,8 +86,10 @@ void JoinGameScreen::tick()
 			if (status == 1) {
 				const std::vector<std::string> answer = minecraft->platform()->getUserInput();
 				const std::string name     = answer.size() > 0 ? answer[0] : std::string();
-				const std::string password = answer.size() > 1 ? answer[1] : std::string();
-				minecraft->platform()->createServer(name, password);
+				const std::string mode     = answer.size() > 1 ? answer[1] : std::string();
+				const std::string seed     = answer.size() > 2 ? answer[2] : std::string();
+				const std::string password = answer.size() > 3 ? answer[3] : std::string();
+				minecraft->platform()->createServer(name, mode, seed, password);
 				_creating = CREATE_SENDING;
 			} else {
 				_creating = CREATE_IDLE;

@@ -133,7 +133,7 @@ function publish() {
 	const list = [];
 	for (const s of running.values())
 		list.push({
-			id: s.id, name: s.name, world: s.world, mode: s.mode,
+			id: s.id, name: s.name, world: s.world, mode: s.mode, seed: s.seed,
 			host: '127.0.0.1', port: s.port,
 			salt: s.salt, passwordHash: s.passwordHash
 		});
@@ -166,7 +166,7 @@ function start(entry) {
 		'--leveldir', entry.id,
 		'--levelname', entry.name,
 		'--gamemode', entry.mode === 'survival' ? 'survival' : 'creative'
-	], { cwd: dir, stdio: ['ignore', 'pipe', 'pipe'] });
+	].concat(entry.seed ? ['--seed', entry.seed] : []), { cwd: dir, stdio: ['ignore', 'pipe', 'pipe'] });
 
 	child.stdout.resume();
 	child.stderr.resume();
@@ -277,6 +277,10 @@ const server = http.createServer((req, res) => {
 				 * written into level.dat at generation, so changing it here
 				 * later would just be a lie the board told about the world. */
 				mode: body.mode === 'survival' ? 'survival' : 'creative',
+				/* Digits only, and capped: it goes on a command line as an
+				 * argument, and a seed is a number however it was typed. Empty
+				 * means the server picks one. */
+				seed: String(body.seed || '').replace(/[^0-9-]/g, '').slice(0, 19),
 				salt: salt,
 				passwordHash: password ? crypto.createHash('sha256').update(salt + password).digest('hex') : ''
 			};
@@ -361,6 +365,7 @@ function restore() {
 			world: cleanName(entry.world) || 'dedicated',
 			port: port,
 			mode: entry.mode === 'survival' ? 'survival' : 'creative',
+			seed: String(entry.seed || '').replace(/[^0-9-]/g, '').slice(0, 19),
 			salt: typeof entry.salt === 'string' ? entry.salt : '',
 			passwordHash: typeof entry.passwordHash === 'string' ? entry.passwordHash : ''
 		};

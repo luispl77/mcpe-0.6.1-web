@@ -47,7 +47,8 @@ public:
 
 	/// Dedicated worlds, when the page has been given a manager to talk to.
 	bool canCreateServers();
-	void createServer(const std::string& name, const std::string& password);
+	void createServer(const std::string& name, const std::string& mode,
+	                  const std::string& seed, const std::string& password);
 	int  createServerStatus();
 
 	BinaryBlob readAssetFile(const std::string& filename);

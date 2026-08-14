@@ -32,6 +32,8 @@
 EM_JS(void, mcpe_dialog_open, (const char* title, const char* okLabel,
                                const char* label0, const char* value0,
                                const char* label1, const char* value1,
+                               const char* label2, const char* value2,
+                               const char* label3, const char* value3,
                                int mask), {
 	if (!window.mcpeDialog) return;
 	window.mcpeDialog.open({
@@ -39,7 +41,9 @@ EM_JS(void, mcpe_dialog_open, (const char* title, const char* okLabel,
 		okLabel: UTF8ToString(okLabel),
 		fields: [
 			{ label: UTF8ToString(label0), value: UTF8ToString(value0), password: (mask & 1) !== 0 },
-			{ label: UTF8ToString(label1), value: UTF8ToString(value1), password: (mask & 2) !== 0 }
+			{ label: UTF8ToString(label1), value: UTF8ToString(value1), password: (mask & 2) !== 0 },
+			{ label: UTF8ToString(label2), value: UTF8ToString(value2), password: (mask & 4) !== 0 },
+			{ label: UTF8ToString(label3), value: UTF8ToString(value3), password: (mask & 8) !== 0 }
 		].filter(function (f) { return f.label !== ''; })
 	});
 });
@@ -88,26 +92,28 @@ void AppPlatform_sdl::showDialog(int dialogId)
 		_dialogFields = 2;
 		mcpe_dialog_open("Create world", "Create",
 		                 "World name", "World",
-		                 "Seed (blank for random)", "", 0);
+		                 "Seed (blank for random)", "", "", "", "", "", 0);
 		break;
 
 	case DialogDefinitions::DIALOG_RENAME_MP_WORLD:
 		_dialogFields = 1;
-		mcpe_dialog_open("Rename world", "Rename", "New name", "", "", "", 0);
+		mcpe_dialog_open("Rename world", "Rename", "New name", "", "", "", "", "", "", "", 0);
 		break;
 
 	case DialogDefinitions::DIALOG_CREATE_SERVER:
 		// A password is a real password field in the page rather than a second
 		// popup, which is the whole reason this stopped being window.prompt.
-		_dialogFields = 2;
+		_dialogFields = 4;
 		mcpe_dialog_open("New server", "Create",
 		                 "Server name", "",
-		                 "Password (blank for none)", "", 2);
+		                 "Mode (survival or creative)", "survival",
+		                 "Seed (blank for random)", "",
+		                 "Password (blank for none)", "", 8);
 		break;
 
 	case DialogDefinitions::DIALOG_NEW_CHAT_MESSAGE:
 		_dialogFields = 1;
-		mcpe_dialog_open("Chat", "Send", "Message", "", "", "", 0);
+		mcpe_dialog_open("Chat", "Send", "Message", "", "", "", "", "", "", "", 0);
 		break;
 
 	default:
@@ -161,8 +167,9 @@ EM_JS(int, mcpe_servers_enabled, (), {
 	return (window.mcpeServers && window.mcpeServers.enabled()) ? 1 : 0;
 });
 
-EM_JS(void, mcpe_servers_create, (const char* name, const char* password), {
-	if (window.mcpeServers) window.mcpeServers.create(UTF8ToString(name), UTF8ToString(password));
+EM_JS(void, mcpe_servers_create, (const char* name, const char* mode, const char* seed, const char* password), {
+	if (window.mcpeServers)
+		window.mcpeServers.create(UTF8ToString(name), UTF8ToString(mode), UTF8ToString(seed), UTF8ToString(password));
 });
 
 /// USERINPUT_NOTINITED while the request is in flight, then OK or CANCEL.
@@ -175,9 +182,10 @@ bool AppPlatform_sdl::canCreateServers()
 	return mcpe_servers_enabled() != 0;
 }
 
-void AppPlatform_sdl::createServer(const std::string& name, const std::string& password)
+void AppPlatform_sdl::createServer(const std::string& name, const std::string& mode,
+                                   const std::string& seed, const std::string& password)
 {
-	mcpe_servers_create(name.c_str(), password.c_str());
+	mcpe_servers_create(name.c_str(), mode.c_str(), seed.c_str(), password.c_str());
 }
 
 int AppPlatform_sdl::createServerStatus()

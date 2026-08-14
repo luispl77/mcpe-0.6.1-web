@@ -1461,14 +1461,21 @@
     window.mcpeServers = {
       enabled: function () { return !!url; },
 
-      create: function (name, password) {
+      create: function (name, mode, seed, password) {
         if (!url) { status = CANCEL; return; }
         status = NOTINITED;
         last = null;
         fetch(url + '/create', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: name || 'World', password: password || '' })
+          body: JSON.stringify({
+            name: name || 'World',
+            // Anything that is not survival is creative, so a typo makes the
+            // safer of the two rather than refusing the whole request.
+            mode: /^\s*s/i.test(mode || '') ? 'survival' : 'creative',
+            seed: (seed || '').trim(),
+            password: password || ''
+          })
         }).then(function (r) {
           return r.ok ? r.json() : null;
         }).then(function (body) {

@@ -106,7 +106,8 @@ public:
 	    that polls is a screen that never blocks a frame. Status follows the
 	    USERINPUT convention -- NOTINITED while it is still going. */
 	virtual bool canCreateServers() { return false; }
-	virtual void createServer(const std::string& name, const std::string& password) {}
+	virtual void createServer(const std::string& name, const std::string& mode,
+	                          const std::string& seed, const std::string& password) {}
 	virtual int  createServerStatus() { return 0; }
 
 	virtual std::string getDateString(int s) { return ""; }
