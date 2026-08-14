@@ -1633,6 +1633,34 @@
      * the world is running, and a stale entry costs a key nobody asks about. */
     var OWNERS_KEY = 'mcpe.serverOwners';
 
+    /* The password for a locked server, so it is typed once rather than every
+     * time you join.
+     *
+     * Kept separately from the unlock itself, which is per tab and has to be:
+     * the relay binds an unlock to the socket that asked for it, so a new tab
+     * is a new socket and genuinely must ask again. What can be remembered is
+     * the answer to the question, not the permission it bought.
+     *
+     * Plaintext in localStorage, which is worth saying plainly. It is a
+     * password for a Minecraft server, held by the browser of the person who
+     * typed it, and anything with the run of this origin could read it -- but
+     * anything with the run of this origin could also just join the world. */
+    var PASSWORDS_KEY = 'mcpe.serverPasswords';
+
+    function passwords() {
+      try { return JSON.parse(localStorage.getItem(PASSWORDS_KEY) || '{}') || {}; }
+      catch (e) { return {}; }
+    }
+
+    function rememberPassword(id, password) {
+      if (!id) return;
+      try {
+        var all = passwords();
+        if (password) all[id] = password; else delete all[id];
+        localStorage.setItem(PASSWORDS_KEY, JSON.stringify(all));
+      } catch (e) { /* private mode: typed once per session rather than once */ }
+    }
+
     function idForRoute(route) {
       return (window.mcpeLobby && window.mcpeLobby.idForRoute)
         ? window.mcpeLobby.idForRoute(route) : '';
@@ -1859,8 +1887,12 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(patch)
-        }).then(function (r) { status = r.ok ? OK : CANCEL; })
-          .catch(function () { status = CANCEL; });
+        }).then(function (r) {
+          // The owner has just changed it, so whatever was saved is now wrong.
+          // Save the new one instead -- they are about to want it too.
+          if (r.ok && patch.password !== undefined) rememberPassword(id, patch.password);
+          status = r.ok ? OK : CANCEL;
+        }).catch(function () { status = CANCEL; });
       },
 
       /** Offer a password for a locked server, before joining it.
@@ -1871,10 +1903,32 @@
           is enforced by the switch, and the switch is the lobby's. */
       unlock: function (route, password) {
         if (!window.mcpeLobby || !window.mcpeLobby.unlockWith) { status = CANCEL; return; }
+        var id = idForRoute(route);
+
+        /* An empty password means "use the one you remembered". The game never
+         * sends an empty one from the field -- the screen refuses to submit
+         * blank -- so this cannot collide with somebody typing nothing. It is
+         * the game asking to be let in without being handed the secret, which
+         * is the right way round: the page is what stored it. */
+        if (!password) password = (id && passwords()[id]) || '';
+        if (!password) { status = CANCEL; return; }
+
         status = NOTINITED;
         window.mcpeLobby.unlockWith(route, password)
-          .then(function (opened) { status = opened ? OK : CANCEL; })
+          .then(function (opened) {
+            // Only a password that actually worked is worth keeping, and one
+            // that stopped working is worth dropping -- otherwise a server
+            // whose password changed would retry a dead one for ever.
+            if (id) rememberPassword(id, opened ? password : '');
+            status = opened ? OK : CANCEL;
+          })
           .catch(function () { status = CANCEL; });
+      },
+
+      /** Whether there is a saved password to try for this server. */
+      hasPassword: function (route) {
+        var id = idForRoute(route);
+        return !!(id && passwords()[id]);
       }
     };
   })();

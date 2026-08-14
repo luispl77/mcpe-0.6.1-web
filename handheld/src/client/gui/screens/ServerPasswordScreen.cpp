@@ -14,7 +14,8 @@ ServerPasswordScreen::ServerPasswordScreen(const PingedCompatibleServer& server,
 	bJoin(NULL),
 	bCancel(NULL),
 	tPassword(10, ""),
-	_state(STATE_EDITING)
+	_state(STATE_EDITING),
+	_usedSaved(false)
 {
 	tPassword.placeholder = "Password";
 	tPassword.maxLength = 24;
@@ -36,6 +37,21 @@ void ServerPasswordScreen::init()
 	buttons.push_back(bCancel);
 
 	textBoxes.push_back(&tPassword);
+
+	/* If this password has been typed once already, try it before asking again.
+	   The screen still appears -- it is where "wrong password" has to be said
+	   if the owner has changed it since -- but for the ordinary case it is a
+	   frame of "Using saved password..." on the way into the world.
+
+	   The game is never handed the secret. An empty password means "use the one
+	   you kept", which cannot be confused with somebody submitting a blank
+	   field because buttonClicked refuses to send one. */
+	if (minecraft->platform()->hasServerPassword(_route)) {
+		_usedSaved = true;
+		_state = STATE_SENDING;
+		minecraft->platform()->unlockServer(_route, std::string());
+		return;
+	}
 
 	// There is one field and one reason to be here.
 	tPassword.setFocus(minecraft);
@@ -107,7 +123,15 @@ void ServerPasswordScreen::tick()
 	/* Stays on this screen with the field intact. A wrong password is the
 	 * ordinary reason to be here twice, and dropping back to the list would
 	 * make it look like the join itself had failed. */
-	_error = "Wrong password";
+	if (_usedSaved) {
+		// Said differently, because nobody typed anything: the password that
+		// worked last time does not any more, which means the owner changed it.
+		// The page has already dropped it, so the field below is the way in.
+		_error = "The saved password no longer works";
+		_usedSaved = false;
+	} else {
+		_error = "Wrong password";
+	}
 	_state = STATE_EDITING;
 	tPassword.setFocus(minecraft);
 }

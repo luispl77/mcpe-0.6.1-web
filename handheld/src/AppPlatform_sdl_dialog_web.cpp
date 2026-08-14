@@ -299,9 +299,18 @@ void AppPlatform_sdl::logOut()
 	mcpe_account_logout();
 }
 
+EM_JS(int, mcpe_servers_has_password, (unsigned int route), {
+	return (window.mcpeServers && window.mcpeServers.hasPassword(route)) ? 1 : 0;
+});
+
 void AppPlatform_sdl::unlockServer(unsigned int route, const std::string& password)
 {
 	mcpe_servers_unlock(route, password.c_str());
+}
+
+bool AppPlatform_sdl::hasServerPassword(unsigned int route)
+{
+	return mcpe_servers_has_password(route) != 0;
 }
 
 /* ---------------------------------------------------------------------------

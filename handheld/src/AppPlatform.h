@@ -155,6 +155,14 @@ public:
 	    password and types it. Asked beforehand, nothing is counting. */
 	virtual void unlockServer(unsigned int route, const std::string& password) {}
 
+	/** Whether a password for this server has already been typed once.
+
+	    An empty password to unlockServer() then means "use that one". The game
+	    never has the secret itself, which is the right way round -- the page is
+	    what stored it -- and it cannot be confused with somebody submitting a
+	    blank field, because the screen refuses to send one. */
+	virtual bool hasServerPassword(unsigned int route) { return false; }
+
 	virtual std::string getDateString(int s) { return ""; }
 	//virtual void createUserInputScreen(const char* types) {}
 

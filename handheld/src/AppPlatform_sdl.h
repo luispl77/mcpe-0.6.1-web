@@ -74,6 +74,7 @@ public:
 	void logOut();
 
 	void unlockServer(unsigned int route, const std::string& password);
+	bool hasServerPassword(unsigned int route);
 
 	BinaryBlob readAssetFile(const std::string& filename);
 	TextureData loadTexture(const std::string& filename_, bool textureFolder);

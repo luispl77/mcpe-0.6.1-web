@@ -52,6 +52,10 @@ private:
 	enum State { STATE_EDITING, STATE_SENDING };
 	State _state;
 	std::string _error;
+
+	/// Whether the attempt in flight is one nobody typed, so that a refusal can
+	/// say the saved password went stale rather than blaming the player's typing.
+	bool _usedSaved;
 };
 
 #endif /*NET_MINECRAFT_CLIENT_GUI_SCREENS__ServerPasswordScreen_H__*/
