@@ -124,6 +124,37 @@ public:
 	virtual void configureServer(unsigned int route, const std::string& name,
 	                             const std::string& password, bool setPassword) {}
 
+	/** Signing in, and only for the server list.
+
+	    Not a login for the game. Single player, joining somebody's world and
+	    hosting your own all work signed out and never ask, which is why this
+	    sits beside the server calls rather than anywhere near startup: the one
+	    thing here worth protecting is a world on somebody else's box that
+	    outlives the tab that made it, and that is the only thing it guards.
+
+	    What it buys is ownership that follows a person instead of a browser.
+	    Before it, canManageServer() was really "does this localStorage hold a
+	    secret" -- so your own worlds were strangers' worlds on your phone, and
+	    clearing site data lost them for good.
+
+	    logIn() is fire-and-poll like createServer(), for the same reason: the
+	    answer comes back over the network whenever it comes back. */
+	virtual bool hasAccounts() { return false; }
+	virtual std::string accountName() { return ""; }
+	virtual void logIn(const std::string& user, const std::string& password, bool createNew) {}
+	virtual int  logInStatus() { return 0; }
+	/// Why the last attempt failed, in words meant for the player.
+	virtual std::string logInError() { return ""; }
+	virtual void logOut() {}
+
+	/** Offering a password for a locked server, before joining it.
+
+	    Before this, the page noticed the first datagram to a locked route and
+	    put a prompt up -- by which time RakNet was already counting down its
+	    connection attempt, and it gives up long before anybody finds the
+	    password and types it. Asked beforehand, nothing is counting. */
+	virtual void unlockServer(unsigned int route, const std::string& password) {}
+
 	virtual std::string getDateString(int s) { return ""; }
 	//virtual void createUserInputScreen(const char* types) {}
 

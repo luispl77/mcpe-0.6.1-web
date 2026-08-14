@@ -1499,31 +1499,53 @@
         return false;
       },
 
+      /** Offer a password for a server. Resolves true if the door opened.
+
+          Split out of unlock() so that the game can do the asking. Waiting for
+          the first datagram was the only signal available while the page owned
+          the field, and it is a bad moment to start a conversation: RakNet has
+          already begun its connection attempt by then and gives up after about
+          six seconds, which is not long enough to read a prompt, find the
+          password and type it. A screen that asks before joinMultiplayer() is
+          called has all the time in the world, because nothing is counting. */
+      unlockWith: function (route, password) {
+        var net = window.mcpeNet;
+        var mine = net ? net.route() : 0;
+        var token = net ? net.token() : '';
+        if (!url || !mine || !token) return Promise.resolve(false);
+
+        return fetch(url + '/unlock', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ route: mine, token: token, server: route, password: password || '' })
+        }).then(function (r) {
+          // Only on success: a wrong password leaves the door shut, and the
+          // next attempt asks again rather than silently never arriving.
+          if (r.ok) opened[route] = true;
+          return r.ok;
+        }).catch(function () { return false; });
+      },
+
+      /* The backstop, and only that now.
+       *
+       * The game asks for the password on a screen of its own before it joins,
+       * so by the time anything is sent the route is already open and this does
+       * not fire. What is left is the case it cannot cover -- a datagram to a
+       * locked route nobody prompted for, which means a page and a wasm that
+       * disagree about the board. Better a popup than a join that silently
+       * never happens. */
       unlock: function (route) {
         if (!url || asking[route]) return;
         asking[route] = true;
 
-        var net = window.mcpeNet;
-        var mine = net ? net.route() : 0;
-        var token = net ? net.token() : '';
-        if (!mine || !token) { asking[route] = false; return; }
-
+        var self = this;
         window.mcpeDialog.ask({
           title: 'This server has a password',
           okLabel: 'Join',
           fields: [{ label: 'Password', value: '', password: true }]
         }).then(function (values) {
           if (!values) { asking[route] = false; return; }   // cancelled: stay out
-          return fetch(url + '/unlock', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ route: mine, token: token, server: route, password: values[0] })
-          }).then(function (r) {
-            asking[route] = false;
-            // Only on success: a wrong password leaves the door shut, and the
-            // next datagram asks again rather than silently never arriving.
-            if (r.ok) opened[route] = true;
-          });
+          return self.unlockWith(route, values[0]).then(function () { asking[route] = false; });
         }).catch(function () { asking[route] = false; });
       },
 
@@ -1630,6 +1652,125 @@
       } catch (e) { /* private mode: the world is still made, just not ours */ }
     }
 
+    /* -------------------------------------------------------------------
+     * Accounts
+     *
+     * Deliberately only the server list. Single player, joining a world and
+     * hosting your own tab all work signed out and are not asked about --
+     * this is a login for the one thing that has something to protect, which
+     * is a world on somebody else's box that outlives the tab that made it.
+     *
+     * What it replaces is the browser secret above: ownership that is really
+     * a localStorage entry, so your worlds are not yours on your phone and
+     * stop being yours the moment you clear site data. Both live side by
+     * side rather than one migrating to the other, because every world made
+     * before today is owned the old way and none of them should stop working.
+     * ----------------------------------------------------------------- */
+    var ACCOUNT_KEY = 'mcpe.account';
+
+    var me = '', tok = '';
+    var mine = [];            // ids of worlds this account owns
+    var minedAt = 0;
+    var authStatus = NOTINITED, authError = '';
+
+    function forget() {
+      me = ''; tok = ''; mine = []; minedAt = 0;
+      try { localStorage.removeItem(ACCOUNT_KEY); } catch (e) {}
+    }
+
+    function keep() {
+      try { localStorage.setItem(ACCOUNT_KEY, JSON.stringify({ user: me, token: tok })); }
+      catch (e) { /* private mode: signed in for this tab and no longer */ }
+    }
+
+    /** Re-checks the token and refreshes what it owns. Fire and forget. */
+    function refreshMine() {
+      if (!url || !tok) return;
+      minedAt = Date.now();
+      fetch(url + '/whoami', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: tok })
+      }).then(function (r) {
+        // A token a month old against a manager that no longer knows it: the
+        // honest answer is signed out, not a name with nothing behind it.
+        if (r.status === 403) { forget(); return null; }
+        return r.ok ? r.json() : null;
+      }).then(function (body) {
+        if (!body) return;
+        me = body.user || me;
+        mine = body.servers || [];
+      }).catch(function () { /* offline: keep what we last knew */ });
+    }
+
+    (function restoreAccount() {
+      var saved = null;
+      try { saved = JSON.parse(localStorage.getItem(ACCOUNT_KEY) || 'null'); } catch (e) {}
+      if (!saved || !saved.token) return;
+      me = saved.user || '';
+      tok = saved.token;
+      refreshMine();
+    })();
+
+    window.mcpeAccounts = {
+      // Same switch as the server list, because it is the same service and
+      // there is nothing to sign in to without one.
+      enabled: function () { return !!url; },
+
+      /** The signed-in name, or '' -- which is the whole of "am I signed in". */
+      name: function () { return me; },
+
+      /** Sign in, or make the account first. One call because it is one
+          screen with two buttons, and everything after the first request is
+          identical. */
+      logIn: function (user, pass, createNew) {
+        if (!url) { authStatus = CANCEL; authError = 'No server list here'; return; }
+        authStatus = NOTINITED;
+        authError = '';
+        fetch(url + (createNew ? '/register' : '/login'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ user: user || '', pass: pass || '' })
+        }).then(function (r) {
+          return r.json().catch(function () { return {}; })
+            .then(function (body) { return { ok: r.ok, body: body }; });
+        }).then(function (out) {
+          if (!out.ok || !out.body.token) {
+            authError = out.body.error || 'Could not sign in';
+            authStatus = CANCEL;
+            return;
+          }
+          me = out.body.user || user;
+          tok = out.body.token;
+          mine = [];
+          keep();
+          refreshMine();
+          authStatus = OK;
+        }).catch(function () {
+          authError = 'Could not reach the server list';
+          authStatus = CANCEL;
+        });
+      },
+
+      /* Signing out is dropping the token, and only that -- nothing is told
+       * to forget it at the far end. It is signed rather than stored there,
+       * which is what makes a restart not sign everybody out; the cost is
+       * that a token stays good until it expires or the password changes. On
+       * a shared machine, change the password. */
+      logOut: function () { forget(); },
+
+      // The USERINPUT convention again: reporting consumes.
+      status: function () { var s = authStatus; if (s !== NOTINITED) authStatus = NOTINITED; return s; },
+      error: function () { return authError; }
+    };
+
+    /** Whether this world is ours, either way round. */
+    function ownsWorld(id) {
+      if (!id) return false;
+      if (tok && mine.indexOf(id) >= 0) return true;
+      return !!owners()[id];
+    }
+
     window.mcpeServers = {
       enabled: function () { return !!url; },
 
@@ -1646,13 +1787,17 @@
             // safer of the two rather than refusing the whole request.
             mode: /^\s*s/i.test(mode || '') ? 'survival' : 'creative',
             seed: (seed || '').trim(),
-            password: password || ''
+            password: password || '',
+            // Signed in, the world belongs to the account and no secret comes
+            // back at all. Signed out this is absent and the old path runs.
+            token: tok
           })
         }).then(function (r) {
           return r.ok ? r.json() : null;
         }).then(function (body) {
           last = body;
           if (body) remember(body.id, body.owner);
+          if (body && tok) refreshMine();
           status = body ? OK : CANCEL;
         }).catch(function () {
           // An unreachable manager is a refusal, not an exception: the screen
@@ -1670,36 +1815,44 @@
 
       created: function () { return last; },
 
-      /** Whether this browser holds the secret for the world on this route.
-          The game asks before it draws Delete, so a world somebody else made
-          has no button rather than a button that answers 403. */
+      /** Whether this world is ours -- by account, or by the older browser
+          secret. The game asks before it draws Delete, so a world somebody
+          else made has no button rather than a button that answers 403.
+
+          Answered from what is already known rather than by asking, because
+          the game calls this as the selection moves and buttons that appeared
+          a beat after the row would be buttons you press by accident. What it
+          reads is refreshed behind it. */
       canManage: function (route) {
-        var id = idForRoute(route);
-        return !!(id && owners()[id]);
+        if (tok && Date.now() - minedAt > 15000) refreshMine();
+        return ownsWorld(idForRoute(route));
       },
 
       /** Stops a world and moves its directory aside. Same fire-and-poll shape
           as create(), because the screen that calls it polls the same way. */
       remove: function (route) {
         var id = idForRoute(route);
-        var secret = id && owners()[id];
-        if (!url || !secret) { status = CANCEL; return; }
+        if (!url || !ownsWorld(id)) { status = CANCEL; return; }
         status = NOTINITED;
         fetch(url + '/delete', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ id: id, owner: secret })
-        }).then(function (r) { status = r.ok ? OK : CANCEL; })
-          .catch(function () { status = CANCEL; });
+          // Both keys, and the manager picks the one this world answers to.
+          // Sending the wrong one costs nothing; guessing which costs a case
+          // where the page and the manager disagree about who owns what.
+          body: JSON.stringify({ id: id, owner: owners()[id] || '', token: tok })
+        }).then(function (r) {
+          if (r.ok && tok) refreshMine();
+          status = r.ok ? OK : CANCEL;
+        }).catch(function () { status = CANCEL; });
       },
 
       /** Rename, and set or clear the password. A blank password clears it. */
       configure: function (route, name, password) {
         var id = idForRoute(route);
-        var secret = id && owners()[id];
-        if (!url || !secret) { status = CANCEL; return; }
+        if (!url || !ownsWorld(id)) { status = CANCEL; return; }
         status = NOTINITED;
-        var patch = { id: id, owner: secret };
+        var patch = { id: id, owner: owners()[id] || '', token: tok };
         if (name) patch.name = name;
         if (password !== null && password !== undefined) patch.password = password;
         fetch(url + '/configure', {
@@ -1707,6 +1860,20 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(patch)
         }).then(function (r) { status = r.ok ? OK : CANCEL; })
+          .catch(function () { status = CANCEL; });
+      },
+
+      /** Offer a password for a locked server, before joining it.
+
+          Lives here rather than on mcpeLobby's side of the fence because this
+          is the object the game already polls for an answer, and the screen
+          asking is a server screen. The lobby still does the work -- the lock
+          is enforced by the switch, and the switch is the lobby's. */
+      unlock: function (route, password) {
+        if (!window.mcpeLobby || !window.mcpeLobby.unlockWith) { status = CANCEL; return; }
+        status = NOTINITED;
+        window.mcpeLobby.unlockWith(route, password)
+          .then(function (opened) { status = opened ? OK : CANCEL; })
           .catch(function () { status = CANCEL; });
       }
     };

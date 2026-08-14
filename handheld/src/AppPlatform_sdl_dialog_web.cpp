@@ -66,16 +66,20 @@ EM_JS(char*, mcpe_dialog_value, (int index), {
 	return buf;
 });
 
-/// Wraps mcpe_dialog_value so the malloc'd result can't leak past the copy.
-static std::string takeValue(int index)
+/// Copies a malloc'd string out of JS and frees it, so nothing leaks past here.
+static std::string takeString(char* raw)
 {
-	char* raw = mcpe_dialog_value(index);
 	if (!raw)
 		return std::string();
 
 	std::string out = raw;
 	free(raw);
 	return out;
+}
+
+static std::string takeValue(int index)
+{
+	return takeString(mcpe_dialog_value(index));
 }
 
 void AppPlatform_sdl::showDialog(int dialogId)
@@ -214,6 +218,90 @@ void AppPlatform_sdl::configureServer(unsigned int route, const std::string& nam
                                       const std::string& password, bool setPassword)
 {
 	mcpe_servers_configure(route, name.c_str(), password.c_str(), setPassword ? 1 : 0);
+}
+
+/* ---------------------------------------------------------------------------
+ * Accounts
+ *
+ * The same service as the server list and the same off switch: no manager
+ * means no accounts, which is what keeps github.io's Join card exactly as it
+ * was. Nothing else in the game asks any of this -- signing out is a normal
+ * way to play, and the only thing a name is needed for is saying which worlds
+ * are yours.
+ * ------------------------------------------------------------------------- */
+
+EM_JS(int, mcpe_account_enabled, (), {
+	return (window.mcpeAccounts && window.mcpeAccounts.enabled()) ? 1 : 0;
+});
+
+/// The signed-in name as a malloc'd UTF-8 string, or "" when signed out.
+EM_JS(char*, mcpe_account_name, (), {
+	var text = window.mcpeAccounts ? (window.mcpeAccounts.name() || '') : '';
+	var len = lengthBytesUTF8(text) + 1;
+	var buf = _malloc(len);
+	stringToUTF8(text, buf, len);
+	return buf;
+});
+
+EM_JS(void, mcpe_account_login, (const char* user, const char* password, int createNew), {
+	if (window.mcpeAccounts)
+		window.mcpeAccounts.logIn(UTF8ToString(user), UTF8ToString(password), createNew !== 0);
+});
+
+EM_JS(int, mcpe_account_status, (), {
+	return window.mcpeAccounts ? window.mcpeAccounts.status() : 0;
+});
+
+/// Why the last attempt failed, in the manager's own words where it gave any.
+EM_JS(char*, mcpe_account_error, (), {
+	var text = window.mcpeAccounts ? (window.mcpeAccounts.error() || '') : '';
+	var len = lengthBytesUTF8(text) + 1;
+	var buf = _malloc(len);
+	stringToUTF8(text, buf, len);
+	return buf;
+});
+
+EM_JS(void, mcpe_account_logout, (), {
+	if (window.mcpeAccounts) window.mcpeAccounts.logOut();
+});
+
+EM_JS(void, mcpe_servers_unlock, (unsigned int route, const char* password), {
+	if (window.mcpeServers) window.mcpeServers.unlock(route, UTF8ToString(password));
+});
+
+bool AppPlatform_sdl::hasAccounts()
+{
+	return mcpe_account_enabled() != 0;
+}
+
+std::string AppPlatform_sdl::accountName()
+{
+	return takeString(mcpe_account_name());
+}
+
+void AppPlatform_sdl::logIn(const std::string& user, const std::string& password, bool createNew)
+{
+	mcpe_account_login(user.c_str(), password.c_str(), createNew ? 1 : 0);
+}
+
+int AppPlatform_sdl::logInStatus()
+{
+	return mcpe_account_status();
+}
+
+std::string AppPlatform_sdl::logInError()
+{
+	return takeString(mcpe_account_error());
+}
+
+void AppPlatform_sdl::logOut()
+{
+	mcpe_account_logout();
+}
+
+void AppPlatform_sdl::unlockServer(unsigned int route, const std::string& password)
+{
+	mcpe_servers_unlock(route, password.c_str());
 }
 
 /* ---------------------------------------------------------------------------

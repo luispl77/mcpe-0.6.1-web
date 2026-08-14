@@ -3,6 +3,8 @@
 #include "../ProgressScreen.h"
 #include "../CreateServerScreen.h"
 #include "../ConfigureServerScreen.h"
+#include "../AccountScreen.h"
+#include "../ServerPasswordScreen.h"
 #include "../../../../network/WebRakNetInstance.h"
 #include "../../Font.h"
 #include "../../../Minecraft.h"
@@ -98,11 +100,13 @@ JoinGameScreen::JoinGameScreen()
 	bDelete(  6, "Delete"),
 	bBack(    3, "Back"),
 	bCreate(  4, "New Server"),
+	bAccount( 7, "Sign in"),
 	bHeader(  0, ""),
 	gamesList(NULL),
 	_canCreate(false),
 	_canManage(false),
-	_managedItem(-1)
+	_managedItem(-1),
+	_hasAccounts(false)
 {
 	bJoin.active = false;
 	//gamesList->yInertia = 0.5f;
@@ -131,6 +135,28 @@ void JoinGameScreen::init()
 	_canCreate = minecraft->platform()->canCreateServers();
 	if (_canCreate) buttons.push_back(&bCreate);
 
+	/* The account, beside New Server, because the two belong together: signing
+	 * in is what makes a server yours, and this is the only screen in the game
+	 * that has anything to do with either. Absent where there is no server list
+	 * to sign in to, which is what leaves github.io's Join card as it was.
+	 *
+	 * It says the name once there is one, so that "am I signed in" is answered
+	 * by looking rather than by pressing. */
+	_hasAccounts = minecraft->platform()->hasAccounts();
+	if (_hasAccounts) {
+		_accountName = minecraft->platform()->accountName();
+		bAccount.msg = _accountName.empty() ? "Sign in" : _accountName;
+
+		// Sized to its label: a name can be sixteen characters and "Sign in" is
+		// seven, and a fixed width would either clip one or waste the other.
+		int w = minecraft->font->width(bAccount.msg) + 14;
+		if (w < 50) w = 50;
+		if (w > 92) w = 92;
+		bAccount.width = w;
+
+		buttons.push_back(&bAccount);
+	}
+
 	buttons.push_back(&bHeader);
 
 	minecraft->raknetInstance->clearServerList();
@@ -157,6 +183,13 @@ void JoinGameScreen::setupPositions() {
 	bBack.x = 0;//width / 2 + 4;
 	bCreate.x = width - bCreate.width;
 
+	// Tucked in beside New Server, or against the right edge where there is no
+	// New Server to sit beside.
+	if (_hasAccounts) {
+		bAccount.x = (_canCreate ? bCreate.x : width) - bAccount.width;
+		bAccount.y = 0;
+	}
+
 	/* Three across the bottom. Even thirds rather than fitted widths, because
 	 * two of them come and go with what is selected and buttons that moved
 	 * sideways as you picked different rows would be worse than a gap. */
@@ -169,10 +202,12 @@ void JoinGameScreen::setupPositions() {
 	bDelete.x   = third * 2;
 	bJoin.y = bSettings.y = bDelete.y = height - 28;
 	bHeader.x = bBack.width;
-	// The header fills whatever the two buttons leave, which is not the same
-	// width on both deployments -- there is no New Server button where there is
-	// nowhere to make one.
-	bHeader.width = width - bHeader.x - (_canCreate ? bCreate.width : 0);
+	// The header fills whatever the others leave, which is not the same width on
+	// both deployments -- there is no New Server button and nothing to sign in
+	// to where there is nowhere to make a world.
+	bHeader.width = width - bHeader.x
+	              - (_canCreate ? bCreate.width : 0)
+	              - (_hasAccounts ? bAccount.width : 0);
 }
 
 void JoinGameScreen::buttonClicked(Button* button)
@@ -182,6 +217,24 @@ void JoinGameScreen::buttonClicked(Button* button)
 		if (isIndexValid(gamesList->selectedItem))
 		{
 			PingedCompatibleServer selectedServer = gamesList->copiedServerList[gamesList->selectedItem];
+#if defined(MC_WASM)
+			/* Locked servers get asked first.
+			 *
+			 * The lock lives in the relay's switch, which drops datagrams for a
+			 * server this socket has not opened -- so joining one without the
+			 * password is not a refusal, it is a silence, and RakNet abandons
+			 * the attempt after about six seconds of it. The page used to spot
+			 * that first dropped datagram and put up a prompt, which meant
+			 * finding and typing a password against a countdown that had
+			 * already started. Asked before joinMultiplayer(), nothing is
+			 * counting and the connection that starts is one that can finish. */
+			if (selectedServer.isLocked)
+			{
+				minecraft->setScreen(new ServerPasswordScreen(selectedServer,
+				                                              mcpeRouteOf(selectedServer.address)));
+				return;
+			}
+#endif
 			minecraft->joinMultiplayer(selectedServer);
 			{
 				bJoin.active = false;
@@ -203,8 +256,27 @@ void JoinGameScreen::buttonClicked(Button* button)
 			minecraft->setScreen(new DeleteServerScreen(route, s.name.C_String()));
 		return;
 	}
+	if (_hasAccounts && button->id == bAccount.id)
+	{
+		minecraft->setScreen(new AccountScreen());
+		return;
+	}
 	if (button->id == bCreate.id)
 	{
+		/* Sign in first, where there is anything to sign in to.
+		 *
+		 * Not a rule the manager enforces -- it still makes worlds for anyone
+		 * who asks, which is what stops every world made before today from
+		 * becoming unowned. It is a rule about what is worth offering: a world
+		 * made signed out belongs to a browser, so it is not yours on your
+		 * phone and it stops being yours when you clear site data, and finding
+		 * that out a week later is worse than a screen in the way now. */
+		if (_hasAccounts && _accountName.empty())
+		{
+			minecraft->setScreen(new AccountScreen());
+			return;
+		}
+
 		// A screen of the game's own rather than a panel in the page. It owns
 		// the whole exchange -- asking, sending, and saying what went wrong --
 		// and comes back here when there is something new to list.
@@ -324,6 +396,11 @@ void JoinGameScreen::render( int xm, int ym, float a )
 #else
 		std::string s = "Scanning for WiFi Games...";
 #endif
+		// The header is whatever the buttons leave, and an account button with a
+		// long name in it can leave less than this sentence needs. Shortened
+		// rather than allowed to run under the buttons on either side.
+		if (minecraft->font->width(s) + 16 > bHeader.width)
+			s = "Looking...";
 		drawCenteredString(minecraft->font, s, baseX, 8, 0xffffffff);
 
 		const int textWidth = minecraft->font->width(s);

@@ -71,6 +71,7 @@ private:
 	TButton bDelete;
 	TButton bBack;
 	TButton bCreate;
+	TButton bAccount;
 	THeader bHeader;
 	AvailableGamesList* gamesList;
 
@@ -79,11 +80,17 @@ private:
 	 * around it and a button that came and went would resize the title bar. */
 	bool _canCreate;
 
-	/* Whether the selected row is a world this browser made, refreshed as the
-	 * selection changes rather than every frame: it is a call out to the page,
-	 * and the answer only moves when the selection does. */
+	/* Whether the selected row is a world of ours, refreshed as the selection
+	 * changes rather than every frame: it is a call out to the page, and the
+	 * answer only moves when the selection does. */
 	bool _canManage;
 	int _managedItem;
+
+	/* The account, read once in init(). ScreenChooser builds a new screen
+	 * every time this one is returned to, so signing in or out comes back to a
+	 * screen that has already asked again -- there is nothing to poll for. */
+	bool _hasAccounts;
+	std::string _accountName;
 };
 
 };

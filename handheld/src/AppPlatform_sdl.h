@@ -65,6 +65,16 @@ public:
 	void configureServer(unsigned int route, const std::string& name,
 	                     const std::string& password, bool setPassword);
 
+	/// Signing in to the server list. Nothing else on this target asks.
+	bool hasAccounts();
+	std::string accountName();
+	void logIn(const std::string& user, const std::string& password, bool createNew);
+	int  logInStatus();
+	std::string logInError();
+	void logOut();
+
+	void unlockServer(unsigned int route, const std::string& password);
+
 	BinaryBlob readAssetFile(const std::string& filename);
 	TextureData loadTexture(const std::string& filename_, bool textureFolder);
 	void saveScreenshot(const std::string& filename, int glWidth, int glHeight);
