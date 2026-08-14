@@ -45,6 +45,15 @@ public:
 	int getUserInputStatus();
 	StringVector getUserInput();
 
+	/** Raising and dropping the soft keyboard, which on this target means
+	    focusing and blurring an off-screen input in the page.
+
+	    Only a phone needs it: a desktop browser sends SDL_TEXTINPUT for anything
+	    typed at the canvas, so showKeyboard() there is a call that costs nothing
+	    and changes nothing. See AppPlatform_sdl_dialog_web.cpp. */
+	void showKeyboard();
+	void hideKeyboard();
+
 	/// Dedicated worlds, when the page has been given a manager to talk to.
 	bool canCreateServers();
 	void createServer(const std::string& name, const std::string& mode,

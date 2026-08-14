@@ -945,6 +945,129 @@
 
   <script>
   // ---------------------------------------------------------------------------
+  // The soft keyboard, for the fields the game draws itself.
+  //
+  // A desktop browser needs none of this: it delivers what is typed at the
+  // canvas as SDL_TEXTINPUT and the game already reads that. A phone delivers
+  // nothing, and not for any reason to do with SDL -- a touch device raises its
+  // keyboard for a focused form control and for nothing else, and a <canvas> is
+  // not one. So the page keeps a real <input> off screen for the game's fields
+  // to borrow, and hands back what is typed into it.
+  //
+  // The awkward part is *when*. A mobile browser raises the keyboard for a
+  // focus() made during a user gesture and ignores one made outside it, and the
+  // game does not see a tap until the next frame drains the SDL queue -- by
+  // which time the gesture is over and the focus() would be ignored. So the
+  // asking runs the other way round: this listens for the touch itself, asks the
+  // wasm whether a field is under that point (mcpe_field_at), and focuses the
+  // input there and then, before the game knows a tap happened at all.
+  // ---------------------------------------------------------------------------
+  (function () {
+    var canvas = document.getElementById('canvas');
+
+    /* Off screen, but not display:none or visibility:hidden -- neither can be
+     * focused, which is the one thing this element is for. A 16px font because
+     * anything smaller makes iOS Safari zoom the page when it takes focus. */
+    var input = document.createElement('input');
+    input.type = 'text';
+    input.setAttribute('autocomplete', 'off');
+    input.setAttribute('autocorrect', 'off');
+    input.setAttribute('autocapitalize', 'off');
+    input.spellcheck = false;
+    input.style.cssText =
+      'position:fixed;top:0;left:0;width:1px;height:1px;padding:0;border:0;' +
+      'font-size:16px;opacity:0;z-index:-1;';
+    document.body.appendChild(input);
+
+    function wasm(name) {
+      return (window.mcpeReady && window.Module && Module[name]) ? Module[name] : null;
+    }
+
+    /* The input is a scratch buffer, not a mirror of the field: the game holds
+     * the text and draws it, and this only reports the difference. Cleared on
+     * every focus so an autocorrect suggestion cannot replay an old value. */
+    var last = '';
+
+    input.addEventListener('input', function () {
+      var feed = wasm('_mcpe_feed_text');
+      var key = wasm('_mcpe_feed_key');
+      var now = input.value;
+
+      // Shorter than it was means characters were deleted -- one backspace each,
+      // because a phone keyboard's delete key does not arrive as a keydown the
+      // way a desktop one does.
+      if (key && now.length < last.length) {
+        for (var i = now.length; i < last.length; i++) { key(8, 1); key(8, 0); }
+      } else if (feed) {
+        for (var j = last.length; j < now.length; j++) feed(now.charCodeAt(j));
+      }
+
+      last = now;
+
+      /* Never let it grow without bound: some keyboards need a non-empty value
+       * behind the cursor to offer a delete key at all, so it is trimmed to a
+       * short tail rather than emptied. */
+      if (now.length > 64) { input.value = now.slice(-8); last = input.value; }
+    });
+
+    input.addEventListener('keydown', function (e) {
+      var key = wasm('_mcpe_feed_key');
+      if (!key) return;
+      if (e.key === 'Enter')     { key(13, 1); key(13, 0); e.preventDefault(); }
+      // A hardware keyboard on a tablet does send this, and an empty buffer
+      // means the input event above will not fire for it.
+      else if (e.key === 'Backspace' && input.value === '') { key(8, 1); key(8, 0); }
+    });
+
+    /* While the input holds focus it is the only way in. SDL puts its own key
+     * listeners on the document, so without this a Backspace typed into the
+     * field is delivered twice -- once as the shortening of input.value above,
+     * and again as a keydown the game reads straight off the queue. Two
+     * characters vanish for one press, which is exactly what happened. */
+    ['keydown', 'keyup', 'keypress'].forEach(function (name) {
+      input.addEventListener(name, function (e) { e.stopPropagation(); });
+    });
+
+    window.mcpeKeyboard = {
+      show: function () {
+        /* Only a touch device needs this at all. On a desktop the canvas
+         * already receives everything typed as SDL_TEXTINPUT, and taking focus
+         * away from it to a hidden input would swap a path that works for one
+         * that has to be kept in step with it. */
+        if (!window.mcpeTouch) return;
+        if (document.activeElement !== input) {
+          input.value = '';
+          last = '';
+          input.focus();
+        }
+      },
+      hide: function () {
+        if (document.activeElement === input) {
+          input.blur();
+          if (canvas) canvas.focus();
+        }
+      }
+    };
+
+    /* The gesture half. Only on touch: a desktop click focusing a hidden input
+     * would take the keyboard away from the canvas for no gain, and there the
+     * SDL path already works. */
+    if (window.mcpeTouch && canvas) {
+      canvas.addEventListener('pointerdown', function (e) {
+        var at = wasm('_mcpe_field_at');
+        if (!at) return;
+        var rect = canvas.getBoundingClientRect();
+        if (at((e.clientX - rect.left) | 0, (e.clientY - rect.top) | 0))
+          window.mcpeKeyboard.show();
+        else
+          window.mcpeKeyboard.hide();
+      }, true);
+    }
+  })();
+  </script>
+
+  <script>
+  // ---------------------------------------------------------------------------
   // Menu music.
   //
   // Driven by Minecraft::updateMusic: on whenever no world is loaded, off on the

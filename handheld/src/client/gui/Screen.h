@@ -50,6 +50,15 @@ public:
     virtual void confirmResult(bool result, int id) {}
 	virtual void lostFocus();
 	virtual void toGUICoordinate(int& x, int& y);
+
+	/** Whether a tap at these GUI coordinates would land in an editable field.
+
+	    Asked by the page, from inside the real touch event, because a mobile
+	    browser only raises its keyboard for a focus() that happens during a user
+	    gesture -- and by the time the game has seen the tap, drained it from the
+	    SDL queue on the next frame and focused a field, that gesture is over. So
+	    the page asks first and focuses its off-screen input itself. */
+	bool textBoxAt(int x, int y);
 protected:
 	void updateTabButtonSelection();
 
@@ -58,7 +67,13 @@ protected:
 	virtual void mouseReleased(int x, int y, int buttonNum);
 
 	virtual void keyPressed(int eventKey);
-	virtual void keyboardNewChar(char inputChar) {}
+	virtual void keyboardNewChar(char inputChar);
+
+	/** The field a keystroke belongs to, or NULL when none is focused.
+
+	    Screens with no textBoxes -- which is every screen the game shipped --
+	    get NULL and behave exactly as they did. */
+	TextBox* focusedTextBox();
 public:
 	int width;
 	int height;

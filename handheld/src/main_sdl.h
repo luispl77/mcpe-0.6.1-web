@@ -29,6 +29,9 @@
 #include "platform/input/Mouse.h"
 #include "platform/input/Keyboard.h"
 #include "platform/input/Multitouch.h"
+// mcpe_field_at() asks the screen that is up whether a tap lands in a field,
+// and Minecraft.h only forward-declares Screen.
+#include "client/gui/Screen.h"
 
 static SDL_Window* g_window = 0;
 static bool g_running = true;
@@ -104,6 +107,52 @@ static bool g_storageReady = false;
 extern "C" EMSCRIPTEN_KEEPALIVE void mcpe_storage_ready()
 {
 	g_storageReady = true;
+}
+
+/** A character typed into the page's off-screen input.
+
+    Only a touch device ever gets here. A browser on a desktop sends everything
+    typed at the canvas as SDL_TEXTINPUT, which is already handled below; a
+    phone sends nothing at all, because it raises no keyboard for a canvas. The
+    page therefore keeps a real input off screen for the game's own text fields
+    to focus, and its keystrokes arrive here.
+
+    Deliberately the same queue as the SDL path rather than a second one into
+    the focused field: a field should not have to know which kind of keyboard
+    the character came from, and the ordering between a typed letter and a
+    backspace has to survive the trip. */
+extern "C" EMSCRIPTEN_KEEPALIVE void mcpe_feed_text(int ch)
+{
+	if (ch >= 32 && ch < 127)
+		Keyboard::feedText((char)ch);
+}
+
+/** Keys that carry no character -- backspace, enter -- from that same input,
+    already translated by the page into the codes Keyboard is written against. */
+extern "C" EMSCRIPTEN_KEEPALIVE void mcpe_feed_key(int key, int down)
+{
+	if (key > 0 && key < 256)
+		Keyboard::feed((unsigned char)key, down ? 1 : 0);
+}
+
+/** Whether a tap at these CSS pixels would land in a text field on the screen
+    that is up, so the page can decide whether to raise the keyboard.
+
+    Asked rather than told because of when it has to be answered. A mobile
+    browser raises its keyboard for a focus() made during a user gesture and
+    ignores one made outside it; the game does not see a tap until the next
+    frame drains the SDL queue, by which time the gesture is long over. So the
+    page asks inside its own touch handler, before the game knows anything
+    happened, and focuses its off-screen input on the answer. */
+extern "C" EMSCRIPTEN_KEEPALIVE int mcpe_field_at(int cssX, int cssY)
+{
+	if (!g_state.app || !g_state.app->screen)
+		return 0;
+
+	int x = (int)(cssX * g_state.mouseScaleX);
+	int y = (int)(cssY * g_state.mouseScaleY);
+	g_state.app->screen->toGUICoordinate(x, y);
+	return g_state.app->screen->textBoxAt(x, y) ? 1 : 0;
 }
 
 /** Called from the page when the browser drops pointer lock.

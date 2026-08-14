@@ -64,7 +64,6 @@ public:
 	bool isInGameScreen();
 private:
 	/// What the New Server button is waiting for, if anything.
-	enum CreateState { CREATE_IDLE, CREATE_ASKING, CREATE_SENDING };
 
 	Button bJoin;
 	Button bBack;
@@ -75,8 +74,6 @@ private:
 	 * rather than asked every frame, so the button cannot appear and vanish
 	 * under a thumb if the page is still working out what it can do. */
 	bool _canCreate;
-	CreateState _creating;
-	std::string _createError;
 };
 
 #endif /*NET_MINECRAFT_CLIENT_GUI_SCREENS__JoinGameScreen_H__*/

@@ -63,9 +63,6 @@ public:
 
 	bool isInGameScreen();
 private:
-	/// What the New Server button is waiting for, if anything.
-	enum CreateState { CREATE_IDLE, CREATE_ASKING, CREATE_SENDING };
-
 	Button bJoin;
 	TButton bBack;
 	TButton bCreate;
@@ -76,8 +73,6 @@ private:
 	 * rather than asked every frame, because setupPositions() sizes the header
 	 * around it and a button that came and went would resize the title bar. */
 	bool _canCreate;
-	CreateState _creating;
-	std::string _createError;
 };
 
 };

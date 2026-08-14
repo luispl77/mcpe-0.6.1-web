@@ -100,17 +100,6 @@ void AppPlatform_sdl::showDialog(int dialogId)
 		mcpe_dialog_open("Rename world", "Rename", "New name", "", "", "", "", "", "", "", 0);
 		break;
 
-	case DialogDefinitions::DIALOG_CREATE_SERVER:
-		// A password is a real password field in the page rather than a second
-		// popup, which is the whole reason this stopped being window.prompt.
-		_dialogFields = 4;
-		mcpe_dialog_open("New server", "Create",
-		                 "Server name", "",
-		                 "Mode (survival or creative)", "survival",
-		                 "Seed (blank for random)", "",
-		                 "Password (blank for none)", "", 8);
-		break;
-
 	case DialogDefinitions::DIALOG_NEW_CHAT_MESSAGE:
 		_dialogFields = 1;
 		mcpe_dialog_open("Chat", "Send", "Message", "", "", "", "", "", "", "", 0);
@@ -191,4 +180,39 @@ void AppPlatform_sdl::createServer(const std::string& name, const std::string& m
 int AppPlatform_sdl::createServerStatus()
 {
 	return mcpe_servers_status();
+}
+
+/* ---------------------------------------------------------------------------
+ * The soft keyboard
+ *
+ * A field the game draws itself takes its characters from SDL_TEXTINPUT, which
+ * a desktop browser delivers the moment the canvas has focus -- so on a desktop
+ * there is nothing to do here at all.
+ *
+ * A phone delivers nothing, and not because of anything SDL does: a touch
+ * device raises its keyboard for a focused form control and for nothing else,
+ * and a <canvas> is not one. So the page keeps an input off screen, this is
+ * what focuses it, and what gets typed comes back through mcpe_feed_text into
+ * the same queue SDL_TEXTINPUT feeds. The screens cannot tell the difference,
+ * which is the point.
+ * ------------------------------------------------------------------------- */
+
+EM_JS(void, mcpe_keyboard_show, (), {
+	if (window.mcpeKeyboard) window.mcpeKeyboard.show();
+});
+
+EM_JS(void, mcpe_keyboard_hide, (), {
+	if (window.mcpeKeyboard) window.mcpeKeyboard.hide();
+});
+
+void AppPlatform_sdl::showKeyboard()
+{
+	mcpe_keyboard_show();
+	AppPlatform::showKeyboard();
+}
+
+void AppPlatform_sdl::hideKeyboard()
+{
+	mcpe_keyboard_hide();
+	AppPlatform::hideKeyboard();
 }
