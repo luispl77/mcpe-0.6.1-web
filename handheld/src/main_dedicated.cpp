@@ -39,6 +39,7 @@ int main(int numArguments, char* pszArgs[]) {
 		printf("--leveldir - The name of the server [default: \"%s\"]\n", defaultSettings.getLevelDir().c_str());
 		printf("--help - Shows this message.\n");
 		printf("--port - The port to run the server on. [default: %d]\n", defaultSettings.getPort());
+		printf("--gamemode - survival or creative. [default: creative]\n");
 		printf("--serverkey - The key that the server should use for API calls. [default: \"%s\"]\n", defaultSettings.getServerKey().c_str());
 		printf("-------------------------------------------------------\n");
 		return 0;
@@ -53,7 +54,11 @@ int main(int numArguments, char* pszArgs[]) {
 	((MAIN_CLASS*)g_app)->externalCacheStoragePath = aSettings.getCachePath();
 
 	g_app->init(appContext);
-	LevelSettings settings(getEpochTimeS(), GameType::Creative);
+	// Creative unless asked otherwise, which is what this always did -- but it is
+	// now a choice the caller makes rather than one compiled in, because a
+	// dedicated world people actually play on is usually meant to be survival.
+	LevelSettings settings(getEpochTimeS(),
+	                       aSettings.getGameType() == 0 ? GameType::Survival : GameType::Creative);
 	float startTime = getTimeS();
 	((MAIN_CLASS*)g_app)->selectLevel(aSettings.getLevelDir(), aSettings.getLevelName(),  settings);
 	((MAIN_CLASS*)g_app)->hostMultiplayer(aSettings.getPort());

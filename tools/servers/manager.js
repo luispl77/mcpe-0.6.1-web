@@ -133,7 +133,7 @@ function publish() {
 	const list = [];
 	for (const s of running.values())
 		list.push({
-			id: s.id, name: s.name, world: s.world,
+			id: s.id, name: s.name, world: s.world, mode: s.mode,
 			host: '127.0.0.1', port: s.port,
 			salt: s.salt, passwordHash: s.passwordHash
 		});
@@ -164,7 +164,8 @@ function start(entry) {
 		'--externalpath', dir,
 		'--cachepath', dir,
 		'--leveldir', entry.id,
-		'--levelname', entry.name
+		'--levelname', entry.name,
+		'--gamemode', entry.mode === 'survival' ? 'survival' : 'creative'
 	], { cwd: dir, stdio: ['ignore', 'pipe', 'pipe'] });
 
 	child.stdout.resume();
@@ -239,7 +240,7 @@ const server = http.createServer((req, res) => {
 		const out = [];
 		for (const s of running.values())
 			out.push({
-				id: s.id, name: s.name, world: s.world,
+				id: s.id, name: s.name, world: s.world, mode: s.mode,
 				locked: !!s.passwordHash,
 				upSeconds: Math.round((now - s.startedAt) / 1000),
 				idleSeconds: Math.round((now - s.seenAt) / 1000)
@@ -272,6 +273,10 @@ const server = http.createServer((req, res) => {
 			const salt = password ? crypto.randomBytes(8).toString('hex') : '';
 			const entry = {
 				id: id, name: name, world: cleanName(body.world) || 'dedicated', port: port,
+				/* Fixed when the world is made and never after: the mode is
+				 * written into level.dat at generation, so changing it here
+				 * later would just be a lie the board told about the world. */
+				mode: body.mode === 'survival' ? 'survival' : 'creative',
 				salt: salt,
 				passwordHash: password ? crypto.createHash('sha256').update(salt + password).digest('hex') : ''
 			};
@@ -355,6 +360,7 @@ function restore() {
 			name: cleanName(entry.name) || 'World',
 			world: cleanName(entry.world) || 'dedicated',
 			port: port,
+			mode: entry.mode === 'survival' ? 'survival' : 'creative',
 			salt: typeof entry.salt === 'string' ? entry.salt : '',
 			passwordHash: typeof entry.passwordHash === 'string' ? entry.passwordHash : ''
 		};

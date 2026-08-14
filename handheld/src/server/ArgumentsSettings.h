@@ -11,6 +11,8 @@ public:
 	std::string getLevelDir();
 	bool getShowHelp();
 	int getPort();
+	/// 1 for Creative, 0 for Survival. Creative is what this always was.
+	int getGameType();
 private:
 	std::string cachePath;
 	std::string externalPath;
@@ -19,6 +21,7 @@ private:
 	std::string serverKey;
 	bool showHelp;
 	int port;
+	int gameType;
 };
 
 #endif
