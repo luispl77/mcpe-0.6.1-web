@@ -899,12 +899,40 @@ if (PIDFILE) {
 loadServers();
 
 /* Reload rather than restart, because a restart would take the relay with it:
- * adding a server must not disconnect the players already in a world. The
- * provisioner writes the file and sends this. */
+ * adding a server must not disconnect the players already in a world. */
 process.on('SIGHUP', () => {
 	loadServers();
 	console.log(NAME + ' reloaded servers: ' + servers.size);
 });
+
+/* And noticed rather than only signalled.
+ *
+ * The signal is the fast path, but it cannot be the only one: this service runs
+ * as a DynamicUser and the thing writing the file runs as its own, and one
+ * unprivileged user cannot signal another's process. That is a permission error
+ * at the far end, arriving as a world that was created successfully and simply
+ * never appears -- so the file is also watched, and the signal is only what
+ * makes it immediate.
+ *
+ * A poll rather than fs.watch: the writer renames the file into place, which
+ * replaces the inode fs.watch is holding, and a watcher that silently stops
+ * watching is worse than a stat() every few seconds. */
+let serversStamp = '';
+setInterval(() => {
+	if (!SERVERS_FILE) return;
+	let stamp = '';
+	try {
+		const st = fs.statSync(SERVERS_FILE);
+		stamp = st.mtimeMs + ':' + st.size;
+	} catch (e) {
+		// Unreadable is not the same as empty, and loadServers() agrees: it keeps
+		// what it has rather than emptying the board because of one bad stat.
+		return;
+	}
+	if (stamp === serversStamp) return;
+	serversStamp = stamp;
+	loadServers();
+}, 3000).unref();
 
 server.listen(PORT, HOST, () => {
 	console.log(NAME + '/' + VERSION + ' listening on ' + HOST + ':' + PORT +
