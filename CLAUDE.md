@@ -171,3 +171,20 @@ platform seams say why a workaround exists, because the surrounding code is from
 2013 and the seams are where a 2026 browser disagrees with it. The game's own
 simulation, worldgen and rendering code is close to untouched; keep it that way
 and fix things in the platform layer where you can.
+
+### Profiling the tab
+
+`sleepMs` being the hottest thing in the game was not findable by reading, and
+the profile is unreadable without names — the wasm ships stripped, so every
+frame is `wasm-function[12535]`. Add `--profiling-funcs` to `target_link_options`
+in `handheld/project/web/CMakeLists.txt`, relink (it is a link flag, so no
+recompile), profile, then take it out again — it is a name section on a 9.6 MB
+download that players do not need.
+
+Drive the page with Playwright and use CDP's `Profiler` domain around the window
+you care about. Self time alone is not enough: `_emscripten_get_now` at 20%
+means something is *spinning* on the clock, and only walking up the call tree
+past the sleep frames says who. On this target `usleep` is not a yield — with no
+threads Emscripten implements it as a busy-wait — so any sleep on the main
+thread is pure burn, and a sleep in the render path is also a slower network,
+because `Minecraft::update()` pumps RakNet exactly once per frame.
