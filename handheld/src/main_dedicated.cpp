@@ -28,6 +28,21 @@ void signal_callback_handler(int signum) {
 }
 
 int main(int numArguments, char* pszArgs[]) {
+	/* This process is somebody's log. It is started by the manager with pipes
+	 * for stdout and stderr, and a pipe is not a terminal, so the C library
+	 * block-buffers it: nothing reaches journald until 4 KB have piled up. A
+	 * busy world flushes often enough that nobody noticed; a quiet one holds
+	 * "so-and-so joined the game" for tens of minutes -- and journald then
+	 * stamps the whole burst with the time it arrived, so the timeline reads
+	 * as if a player joined at the moment the buffer happened to fill.
+	 *
+	 * That is exactly backwards for the events worth logging here, which are
+	 * rare by nature: joins, disconnects, and whatever the server said just
+	 * before it stopped saying anything. Line buffering costs a write per line
+	 * on a process that already writes a level to disk every few seconds. */
+	setvbuf(stdout, NULL, _IOLBF, 0);
+	setvbuf(stderr, NULL, _IOLBF, 0);
+
 	ArgumentsSettings aSettings(numArguments, pszArgs);
 	if(aSettings.getShowHelp()) {
 		ArgumentsSettings defaultSettings(0, NULL);
