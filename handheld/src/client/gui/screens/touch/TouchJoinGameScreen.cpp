@@ -216,22 +216,30 @@ void JoinGameScreen::buttonClicked(Button* button)
 	{
 		if (isIndexValid(gamesList->selectedItem))
 		{
-			/* No joining without a name of your own (2026-08-16).
+			PingedCompatibleServer selectedServer = gamesList->copiedServerList[gamesList->selectedItem];
+#if defined(MC_WASM)
+			/* No joining a *dedicated* world without a name of your own
+			 * (2026-08-16).
 			 *
-			 * Signed out, every player is the same "Steve", and the server
-			 * keys everything by name -- most recently the per-player save
-			 * file, so strangers were sharing one position and one inventory.
-			 * The board stays browsable signed out; the way *in* is what asks.
-			 * Same screen New Server already sends you to, and it comes back
-			 * here once you are somebody. */
-			if (_hasAccounts && _accountName.empty())
+			 * Signed out, every player is the same "Steve", and a dedicated
+			 * world keys everything by name -- most recently the per-player
+			 * save file, so strangers were sharing one position and one
+			 * inventory. The board stays browsable signed out; the way *in* is
+			 * what asks.
+			 *
+			 * Only dedicated, because the first cut asked for all of them and
+			 * that was wrong: somebody else's tab is not this service's world.
+			 * Its saves live in the host's browser, nothing here keys anything
+			 * on the joiner's name, and an account buys that join exactly
+			 * nothing -- while costing two friends on phones a registration
+			 * before they can play together, which is the whole use this build
+			 * exists for. */
+			if (selectedServer.isDedicated && _hasAccounts && _accountName.empty())
 			{
 				minecraft->setScreen(new AccountScreen());
 				return;
 			}
 
-			PingedCompatibleServer selectedServer = gamesList->copiedServerList[gamesList->selectedItem];
-#if defined(MC_WASM)
 			/* Locked servers get asked first.
 			 *
 			 * The lock lives in the relay's switch, which drops datagrams for a
