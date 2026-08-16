@@ -60,7 +60,7 @@ const MAX_BODY     = 1024;
  * reaps on silence. Generous, because "nobody is playing right now" is the
  * ordinary state of a server people come back to in the evening. */
 const IDLE_MS  = Number(process.env.MCPE_SERVER_IDLE || 6 * 60 * 60 * 1000);
-const SWEEP_MS = 5 * 60 * 1000;
+const SWEEP_MS = Number(process.env.MCPE_SERVER_SWEEP || 5 * 60 * 1000);
 
 /** Stopping somebody else's world is an operator action, not a visitor's. */
 const OPERATOR_KEY = process.env.MCPE_OPERATOR_KEY || '';
@@ -272,7 +272,7 @@ function publish() {
 	for (const s of running.values())
 		list.push({
 			id: s.id, name: s.name, world: s.world, mode: s.mode, seed: s.seed,
-			host: '127.0.0.1', port: s.port,
+			host: '127.0.0.1', port: s.port, up: !!s.child,
 			salt: s.salt, passwordHash: s.passwordHash,
 			ownerHash: s.ownerHash, ownerAccount: s.ownerAccount
 		});
@@ -330,6 +330,9 @@ function relay(stream, entry) {
 }
 
 function start(entry) {
+	if (entry.child) return;   // already running, or still going down
+	entry.sleeping = false;
+
 	// Before relay() below attaches, because its handlers read these and
 	// arithmetic on undefined is a brake that silently does nothing.
 	entry.said = 0;
@@ -354,8 +357,27 @@ function start(entry) {
 	relay(child.stderr, entry);
 
 	child.on('exit', (code, signal) => {
-		console.log('%s exited (code %s, signal %s)', entry.id, code, signal);
-		if (running.get(entry.id) === entry) { running.delete(entry.id); publish(); }
+		if (entry.child === child) entry.child = null;
+
+		// Already off the board: /delete got there first, and this is just its
+		// process catching up.
+		if (running.get(entry.id) !== entry) {
+			console.log('%s exited (code %s, signal %s)', entry.id, code, signal);
+			return;
+		}
+
+		/* The world stays registered whatever its process did. Deregistering
+		 * here is what emptied the whole board on 2026-08-14: the idle sweep
+		 * stopped every world, each exit erased its record, and three intact
+		 * directories sat under a servers file that said nothing existed. A
+		 * process is how a world runs; the record is that it exists; and only
+		 * /delete may touch the second. Published so the lobby knows a datagram
+		 * for this route now means "wake it" rather than "carry it". */
+		console.log(entry.sleeping
+			? '%s asleep (code %s, signal %s)'
+			: '%s exited unasked (code %s, signal %s); staying on the board, a join wakes it',
+			entry.id, code, signal);
+		publish();
 	});
 
 	entry.child = child;
@@ -364,13 +386,43 @@ function start(entry) {
 	console.log('%s started on %d (pid %d)', entry.id, entry.port, child.pid);
 }
 
+/* Stops the process without forgetting the world. The entry stays in `running`
+ * and in the servers file marked up:false, so the board keeps listing it and
+ * the lobby knows to ask for it back. The exit handler does the bookkeeping;
+ * all this does is ask. */
+function sleep(entry) {
+	if (!entry.child || entry.sleeping) return;
+	entry.sleeping = true;
+	const child = entry.child;
+	try { child.kill('SIGINT'); } catch (e) { /* already gone */ }
+	// SIGINT is what main_dedicated traps to save the level; a world that will
+	// not go down cleanly still has to go down.
+	setTimeout(() => { try { child.kill('SIGKILL'); } catch (e) {} }, 10000).unref();
+}
+
+/* The other half. Called on any sign of interest in a world with no process.
+ * The ten-second floor is for a world that dies at startup: without it, the
+ * joins poking at a broken world would have the manager forking the same crash
+ * in a loop. */
+function wake(entry) {
+	if (entry.child) return;
+	if (Date.now() - (entry.startedAt || 0) < 10000) return;
+	console.log('%s waking up', entry.id);
+	try { start(entry); publish(); }
+	catch (e) { console.log('%s would not wake: %s', entry.id, e.message); }
+}
+
+/* Gone from the record, which only /delete and shutdown may ask for -- and
+ * shutdown only because `leaving` has already frozen the file it would
+ * otherwise rewrite. */
 function stop(entry) {
 	if (!running.has(entry.id)) return;
 	running.delete(entry.id);
-	try { entry.child.kill('SIGINT'); } catch (e) { /* already gone */ }
-	// SIGINT is what main_dedicated traps to save the level; a world that will
-	// not go down cleanly still has to go down.
-	setTimeout(() => { try { entry.child.kill('SIGKILL'); } catch (e) {} }, 10000).unref();
+	if (entry.child) {
+		const child = entry.child;
+		try { child.kill('SIGINT'); } catch (e) { /* already gone */ }
+		setTimeout(() => { try { child.kill('SIGKILL'); } catch (e) {} }, 10000).unref();
+	}
 	publish();
 }
 
@@ -424,7 +476,7 @@ const server = http.createServer((req, res) => {
 		for (const s of running.values())
 			out.push({
 				id: s.id, name: s.name, world: s.world, mode: s.mode,
-				locked: !!s.passwordHash,
+				locked: !!s.passwordHash, up: !!s.child,
 				upSeconds: Math.round((now - s.startedAt) / 1000),
 				idleSeconds: Math.round((now - s.seenAt) / 1000)
 			});
@@ -593,14 +645,21 @@ const server = http.createServer((req, res) => {
 		});
 	}
 
-	/* Activity, so that idle reaping has something to go on. Anybody can say a
-	 * server is busy, which is fine: the failure it buys is a world staying up
-	 * that could have gone down, and never one going down underneath a player. */
+	/* Activity, so that idle reaping has something to go on -- and the wake
+	 * call for a world that is asleep. The lobby's switch posts it: once a
+	 * minute for a world with datagrams flowing, and the moment anything
+	 * knocks at one without a process. Anybody else can say a server is busy
+	 * too, which is fine: the failure it buys is a world staying up that could
+	 * have gone down, or waking for nobody -- and never one going down
+	 * underneath a player. */
 	if (route === '/seen' && req.method === 'POST') {
 		return readBody(req, (body) => {
 			if (!body) return send(res, 400, { error: 'bad json' });
 			const entry = running.get(String(body.id || ''));
-			if (entry) entry.seenAt = Date.now();
+			if (entry) {
+				entry.seenAt = Date.now();
+				wake(entry);
+			}
 			return send(res, 200, { ok: true });
 		});
 	}
@@ -713,6 +772,9 @@ const server = http.createServer((req, res) => {
 		});
 	}
 
+	// An operator putting a world to bed by hand. Asleep, not gone: it keeps
+	// its place on the board and the next join wakes it, which is all "stop"
+	// can safely mean now that only /delete forgets.
 	if (route === '/stop' && req.method === 'POST') {
 		return readBody(req, (body) => {
 			if (!body) return send(res, 400, { error: 'bad json' });
@@ -720,8 +782,8 @@ const server = http.createServer((req, res) => {
 				return send(res, 403, { error: 'not an operator' });
 			const entry = running.get(String(body.id || ''));
 			if (!entry) return send(res, 404, { error: 'no such server' });
-			stop(entry);
-			return send(res, 200, { ok: true });
+			sleep(entry);
+			return send(res, 200, { ok: true, asleep: true });
 		});
 	}
 
@@ -730,10 +792,10 @@ const server = http.createServer((req, res) => {
 
 setInterval(() => {
 	const now = Date.now();
-	for (const entry of Array.from(running.values()))
-		if (now - entry.seenAt > IDLE_MS) {
-			console.log('%s idle for %d minutes, stopping', entry.id, Math.round((now - entry.seenAt) / 60000));
-			stop(entry);
+	for (const entry of running.values())
+		if (entry.child && !entry.sleeping && now - entry.seenAt > IDLE_MS) {
+			console.log('%s idle for %d minutes, going to sleep', entry.id, Math.round((now - entry.seenAt) / 60000));
+			sleep(entry);
 		}
 }, SWEEP_MS).unref();
 

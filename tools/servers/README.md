@@ -27,8 +27,8 @@ node tools/servers/manager.js
 | `POST /create` | `{name, mode?, seed?, password?, token?}` → `{id, name, locked, owner, ownerAccount}` |
 | `POST /configure` | `{id, token\|owner\|key, name?, password?}` — rename, set or clear the password |
 | `POST /delete` | `{id, token\|owner\|key}` — stops it and moves its directory aside |
-| `POST /seen` | `{id}` — says somebody is playing, so it is not reaped |
-| `POST /stop` | `{id, key}` — operator only |
+| `POST /seen` | `{id}` — says somebody is playing; also wakes a sleeping world |
+| `POST /stop` | `{id, key}` — operator only; puts it to sleep, the next join wakes it |
 
 ## Accounts
 
@@ -130,12 +130,25 @@ difference between a feature and a way to fill a disk:
 | `MCPE_MAX_SERVERS` | 8 worlds at once |
 | `MCPE_PORT_FIRST` / `LAST` | 19150–19199, fixed so the firewall rule can be too |
 | `MCPE_CREATE_PER_HOUR` | 6 per source — a brake, not a boundary |
-| `MCPE_SERVER_IDLE` | 6 h with nobody playing, then it is stopped |
+| `MCPE_SERVER_IDLE` | 6 h with nobody playing, then it goes to sleep |
 
-Idle reaping is what actually keeps the box from filling up, and it is the only
-one of these a normal player will ever notice. `/seen` is what holds it off;
-anybody can call it, which is fine — the worst that buys is a world staying up
-that could have gone down, never one going down under a player.
+**Idle means asleep, never gone.** A quiet world's process is stopped (SIGINT,
+so it saves) but its record stays in the servers file marked `up: false`, so
+the board keeps listing it and its port stays reserved. The next datagram at
+its route wakes it: the lobby's switch POSTs `/seen`, the manager starts the
+process again (~1 s), and RakNet's connection retries carry the join across
+the gap. The same rule catches a crash — an exit the manager did not ask for
+leaves the world on the board, asleep, and the next join tries it again (with
+a ten-second floor so a world that dies at startup is not forked in a loop).
+
+Only `/delete` removes a world from the record. This is not a nicety: on
+2026-08-14 reaping *was* deregistration, and six idle hours emptied the whole
+board while every directory sat intact underneath it.
+
+`/seen` is fed by the lobby, which is the thing that can actually see traffic:
+once a minute per active world, and immediately for a sleeping one. Anybody
+else can call it too, which is fine — the worst that buys is a world staying
+up that could have gone down, never one going down under a player.
 
 **There is no authentication on `/create`.** That is a deliberate choice for a
 LAN party, bounded by the caps above rather than by identity, and it is the

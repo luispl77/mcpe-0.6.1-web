@@ -78,6 +78,23 @@ routing table but they are not connections, so they do not show up in
 `connected` and do not consume `MCPE_RELAY_MAX`; registering one must not
 quietly lower how many people can be in a world.
 
+A reload keeps the bridge sockets of any server whose `host:port` has not
+moved. The file is rewritten on every change to any world, and closing the
+peers on each reload made every one of those a kick: the next datagram left
+from a fresh port, and RakNet — which keys peers by address *and* port — met a
+stranger mid-game.
+
+### Telling the manager about traffic
+
+`MCPE_LOBBY_MANAGER` names the manager's HTTP address (empty disables this and
+nothing else). The switch is the only thing that can see which servers
+datagrams actually flow at, so it POSTs `/seen` there: once a minute per
+active server (`MCPE_LOBBY_SEEN_MS`), and immediately — floored at once per
+3 s — for a server whose file entry says `up: false`, because a join is waiting
+on that wake and RakNet only retries for about six seconds. Without this the
+manager counts idleness from the wrong clock and puts worlds to sleep under
+their players.
+
 ### Passwords
 
 `passwordHash` is `sha256(salt + password)` in hex, and empty means the server is

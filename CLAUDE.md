@@ -91,7 +91,10 @@ The board and the services can be stubbed rather than run. `window.mcpeLobby` is
 a plain object the wasm calls into, so replacing it after load puts any server
 list you like on the screen — `name \t world \t route \t flags`, flags bit 0
 dedicated and bit 1 locked. `?servers=`, `?lobby=` and `?relay=` point a local
-build at local services.
+build at local services. `?relay=` is used verbatim and the lobby's WS endpoint
+is at `/relay`, so it is `?relay=ws://127.0.0.1:8477/relay` — without the path
+the socket never opens and every join dies with "Could not connect", while the
+board fills fine over HTTP and nothing logs anywhere.
 
 ## Two deployments, one build
 

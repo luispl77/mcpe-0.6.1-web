@@ -94,6 +94,14 @@ const SERVERS_FILE   = process.env.MCPE_LOBBY_SERVERS || '';
 const MAX_BRIDGE     = Number(process.env.MCPE_BRIDGE_MAX || 400);
 const BRIDGE_IDLE_MS = Number(process.env.MCPE_BRIDGE_IDLE || 60000);
 
+/* The manager, so the switch can tell it what only the switch can see: which
+ * servers datagrams are actually flowing at. The manager knows processes and
+ * counts idleness; without this it counts from the wrong clock and puts worlds
+ * to sleep underneath their players -- which, before sleep existed, is what
+ * emptied the whole board on 2026-08-14. Empty disables the reporting and
+ * nothing else, in the same spirit as every other absent service here. */
+const MANAGER_URL    = (process.env.MCPE_LOBBY_MANAGER || '').replace(/\/+$/, '');
+
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 
 /* The game itself, when this is the deployment serving it as well as the one
@@ -301,7 +309,11 @@ const server = http.createServer((req, res) => {
 				route: route,
 				age: 0,
 				dedicated: true,
-				locked: !!s.passwordHash
+				locked: !!s.passwordHash,
+				// Asleep is still listed: joining is what wakes it. The client
+				// reads rows positionally and ignores this; it is for the page
+				// and for anybody reading the JSON to see the state at all.
+				up: !!s.up
 			});
 		for (const [id, p] of players)
 			out.push({
@@ -585,9 +597,20 @@ function loadServers() {
 			route = allocRoute();
 			if (!route) break;
 		}
+		const host = clean(entry.host, 60) || '127.0.0.1';
+
+		/* The record is replaced; the sockets are kept, as long as they still
+		 * point at the same place. This file is rewritten on every change to
+		 * any world -- one being made, one waking -- and closing the bridge
+		 * peers on each reload turned every one of those into a kick: the next
+		 * datagram left from a fresh socket, and RakNet, which keys peers by
+		 * address and port, met a stranger mid-game. */
 		const previous = servers.get(route);
-		for (const peer of (previous ? previous.peers : new Map()).values())
-			closePeer(peer);
+		let peers = previous ? previous.peers : new Map();
+		if (!previous || previous.host !== host || previous.port !== port) {
+			for (const peer of peers.values()) closePeer(peer);
+			peers = new Map();
+		}
 
 		servers.set(route, {
 			// Also carried on the record, not just the map key: the reply path
@@ -598,11 +621,19 @@ function loadServers() {
 			id: id,
 			name: clean(entry.name, 20) || 'Server',
 			world: clean(entry.world, 20),
-			host: clean(entry.host, 60) || '127.0.0.1',
+			host: host,
 			port: port,
 			salt: clean(entry.salt, 64) || '',
 			passwordHash: clean(entry.passwordHash, 128) || '',
-			peers: new Map()
+			// A world without a process is still on the board; a datagram for
+			// it is the signal to ask the manager for it back.
+			up: !(entry.up === false),
+			peers: peers,
+			// When the switch last saw traffic for it, and when the manager
+			// last heard about that. Survive a reload for the same reason the
+			// peers do: resetting them would re-poke on the next datagram.
+			trafficAt: previous ? previous.trafficAt : 0,
+			reportedAt: previous ? previous.reportedAt : 0
 		});
 		routes.set(route, { isServer: true, route: route, closed: false });
 		keep.add(route);
@@ -623,6 +654,43 @@ function closePeer(peer) {
 	clearTimeout(peer.idle);
 	try { peer.socket.close(); } catch (e) { /* already gone */ }
 }
+
+/** One fact, one direction: this id had traffic. Fire and forget -- the
+    manager being down is not the switch's problem, and a lost report costs a
+    minute of idleness accounting, not a player. */
+function tellSeen(id) {
+	if (!MANAGER_URL) return;
+	const body = Buffer.from(JSON.stringify({ id: id }), 'utf8');
+	const req = http.request(MANAGER_URL + '/seen', {
+		method: 'POST',
+		headers: { 'content-type': 'application/json', 'content-length': body.length }
+	}, (res) => res.resume());
+	req.on('error', () => { /* see above */ });
+	req.end(body);
+}
+
+/* Two speeds, on purpose. A sleeping server is reported the moment anything
+ * knocks, because a join is waiting on the wake and RakNet only retries for
+ * about six seconds; a running one is batched a minute at a time, because all
+ * the manager does with the news is push idleness back. The 3s floor on the
+ * sleeping side is so a stranger hosing datagrams at a locked route costs one
+ * HTTP request per manager attempt, not one per datagram. */
+function sawTraffic(server) {
+	const now = Date.now();
+	server.trafficAt = now;
+	if (!server.up && now - server.reportedAt > 3000) {
+		server.reportedAt = now;
+		tellSeen(server.id);
+	}
+}
+
+setInterval(() => {
+	for (const s of servers.values())
+		if (s.up && s.trafficAt > s.reportedAt) {
+			s.reportedAt = Date.now();
+			tellSeen(s.id);
+		}
+}, Number(process.env.MCPE_LOBBY_SEEN_MS || 60000)).unref();
 
 /** Whether this password opens this server. Empty hash means it is not locked. */
 function unlocks(server, password) {
@@ -711,6 +779,11 @@ function deliver(conn, message) {
 	if (target.isServer) {
 		const server = servers.get(wanted);
 		if (!server) return;
+		// Before the lock, not after: the knock is what wakes a sleeping world,
+		// and the player knocking at a locked one is mid-unlock -- making them
+		// wait for the wake *after* typing the password is the six-second race
+		// the password screen was built to end.
+		sawTraffic(server);
 		// A locked server is locked here rather than in the game, so that being
 		// refused costs a stranger a datagram and not a seat. The unlock is per
 		// socket, so it cannot be replayed from another tab.
