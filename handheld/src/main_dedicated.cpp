@@ -28,21 +28,6 @@ void signal_callback_handler(int signum) {
 }
 
 int main(int numArguments, char* pszArgs[]) {
-	/* This process is somebody's log. It is started by the manager with pipes
-	 * for stdout and stderr, and a pipe is not a terminal, so the C library
-	 * block-buffers it: nothing reaches journald until 4 KB have piled up. A
-	 * busy world flushes often enough that nobody noticed; a quiet one holds
-	 * "so-and-so joined the game" for tens of minutes -- and journald then
-	 * stamps the whole burst with the time it arrived, so the timeline reads
-	 * as if a player joined at the moment the buffer happened to fill.
-	 *
-	 * That is exactly backwards for the events worth logging here, which are
-	 * rare by nature: joins, disconnects, and whatever the server said just
-	 * before it stopped saying anything. Line buffering costs a write per line
-	 * on a process that already writes a level to disk every few seconds. */
-	setvbuf(stdout, NULL, _IOLBF, 0);
-	setvbuf(stderr, NULL, _IOLBF, 0);
-
 	ArgumentsSettings aSettings(numArguments, pszArgs);
 	if(aSettings.getShowHelp()) {
 		ArgumentsSettings defaultSettings(0, NULL);
@@ -54,8 +39,6 @@ int main(int numArguments, char* pszArgs[]) {
 		printf("--leveldir - The name of the server [default: \"%s\"]\n", defaultSettings.getLevelDir().c_str());
 		printf("--help - Shows this message.\n");
 		printf("--port - The port to run the server on. [default: %d]\n", defaultSettings.getPort());
-		printf("--gamemode - survival or creative. [default: creative]\n");
-		printf("--seed - world seed, blank for one from the clock.\n");
 		printf("--serverkey - The key that the server should use for API calls. [default: \"%s\"]\n", defaultSettings.getServerKey().c_str());
 		printf("-------------------------------------------------------\n");
 		return 0;
@@ -70,15 +53,7 @@ int main(int numArguments, char* pszArgs[]) {
 	((MAIN_CLASS*)g_app)->externalCacheStoragePath = aSettings.getCachePath();
 
 	g_app->init(appContext);
-	// Creative unless asked otherwise, which is what this always did -- but it is
-	// now a choice the caller makes rather than one compiled in, because a
-	// dedicated world people actually play on is usually meant to be survival.
-	// A seed given on the command line, or the clock. atoll rather than atoi: a
-	// Minecraft seed is a 64-bit number and truncating it silently would hand
-	// back a different world than the one that was asked for.
-	const long long givenSeed = aSettings.getSeed().empty() ? 0 : atoll(aSettings.getSeed().c_str());
-	LevelSettings settings(givenSeed ? givenSeed : getEpochTimeS(),
-	                       aSettings.getGameType() == 0 ? GameType::Survival : GameType::Creative);
+	LevelSettings settings(getEpochTimeS(), GameType::Creative);
 	float startTime = getTimeS();
 	((MAIN_CLASS*)g_app)->selectLevel(aSettings.getLevelDir(), aSettings.getLevelName(),  settings);
 	((MAIN_CLASS*)g_app)->hostMultiplayer(aSettings.getPort());
@@ -89,13 +64,7 @@ int main(int numArguments, char* pszArgs[]) {
 	while(!app->wantToQuit()) {
 		app->update();
 		//pthread_yield();
-		// Milliseconds, not seconds. sleep(20) is twenty seconds a lap, and the
-		// tick accounting hides how badly that misses: Timer::advanceTime clamps
-		// the gap it will account for to one second and then clamps again at
-		// MAX_TICKS_PER_UPDATE, so a 20s lap buys 10 ticks rather than 400.
-		// Against timer(20) that is 0.5 ticks/s -- measured at 36 ticks in 60s,
-		// where a server keeping up owes 1200.
-		usleep(20 * 1000);
+		sleep(20);
 	}
 	((MAIN_CLASS*)g_app)->level->saveLevelData();
 	delete app;

@@ -250,15 +250,7 @@ public:
     LevelData* getLevelData();
 
 	void saveLevelData();
-
-	/** Where one player was standing when they last left this world.
-
-	    Keyed by the name they logged in with. level.dat has room for exactly
-	    one player and a dedicated world has none of its own, so without these
-	    every join put everybody back at spawn. */
-	bool loadPlayerData(Player* player);
-	void savePlayerData(Player* player);
-	void saveAllPlayerData();
+	//void savePlayerData();
 	void saveGame();
 	void loadEntities();
 

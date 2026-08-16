@@ -58,43 +58,10 @@ cmake --build build -j8
 cd build && python3 -m http.server 8000   # http, not file://
 ```
 
-emsdk **is** installed on the dev box now, at `~/emsdk` (this file used to say it
-was not, and CI was the compile check). The box is shared and has been OOM-killed
-by overlapping heavy jobs before, so run both steps through
+emsdk is **not installed on the dev box**, so in practice CI is the compile
+check: push, dispatch, and read the run. If you do install it, the box is shared
+and has been OOM-killed by overlapping heavy jobs before — run the build through
 `/home/dev/continualmi/infra/watch/heavy.sh`.
-
-`file(GLOB_RECURSE)` is evaluated at configure time, so **a new source file needs
-a re-run of `emcmake cmake`**, not just `cmake --build`. The symptom is an
-undefined symbol for a class you just added.
-
-### Checking a change without a full build
-
-A screen usually breaks in one of two ways, and neither needs three minutes:
-
-```sh
-# Does it parse? Native g++, no emsdk. The game includes <gl/glew.h> and
-# <gl/GL.h> Windows-style, so point it at a directory holding two one-line
-# shims that include <GL/glew.h> and <GL/gl.h>. Needs libgl-dev, libegl-dev.
-g++ -fsyntax-only -w -DMC_WASM -DMC_SDL2 -DMC_DATA_DIR='"/data"' \
-    -I handheld/src -I handheld/project/lib_projects/raknet/jni/RaknetSources \
-    -I <shim-dir> handheld/src/client/gui/screens/YourScreen.cpp
-```
-
-Does it *work*? Drive the built page with Playwright and read the screenshots —
-a GUI layout is one of the things that cannot be checked by reading it, because
-the coordinate space is ~320×180 on desktop web and ~342×192 on touch. Two
-traps: entry to the game is behind `#playBtn` on the touch layout, and
-`page.touchscreen.tap` is instantaneous where the game samples the pointer
-across frames, so use CDP `Input.dispatchTouchEvent` with a ~260 ms hold.
-
-The board and the services can be stubbed rather than run. `window.mcpeLobby` is
-a plain object the wasm calls into, so replacing it after load puts any server
-list you like on the screen — `name \t world \t route \t flags`, flags bit 0
-dedicated and bit 1 locked. `?servers=`, `?lobby=` and `?relay=` point a local
-build at local services. `?relay=` is used verbatim and the lobby's WS endpoint
-is at `/relay`, so it is `?relay=ws://127.0.0.1:8477/relay` — without the path
-the socket never opens and every join dies with "Could not connect", while the
-board fills fine over HTTP and nothing logs anywhere.
 
 ## Two deployments, one build
 
@@ -174,20 +141,3 @@ platform seams say why a workaround exists, because the surrounding code is from
 2013 and the seams are where a 2026 browser disagrees with it. The game's own
 simulation, worldgen and rendering code is close to untouched; keep it that way
 and fix things in the platform layer where you can.
-
-### Profiling the tab
-
-`sleepMs` being the hottest thing in the game was not findable by reading, and
-the profile is unreadable without names — the wasm ships stripped, so every
-frame is `wasm-function[12535]`. Add `--profiling-funcs` to `target_link_options`
-in `handheld/project/web/CMakeLists.txt`, relink (it is a link flag, so no
-recompile), profile, then take it out again — it is a name section on a 9.6 MB
-download that players do not need.
-
-Drive the page with Playwright and use CDP's `Profiler` domain around the window
-you care about. Self time alone is not enough: `_emscripten_get_now` at 20%
-means something is *spinning* on the clock, and only walking up the call tree
-past the sleep frames says who. On this target `usleep` is not a yield — with no
-threads Emscripten implements it as a busy-wait — so any sleep on the main
-thread is pure burn, and a sleep in the render path is also a slower network,
-because `Minecraft::update()` pumps RakNet exactly once per frame.

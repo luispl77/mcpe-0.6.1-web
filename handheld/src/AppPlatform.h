@@ -93,53 +93,6 @@ public:
 	virtual int getUserInputStatus() { return 0; }
 	virtual StringVector getUserInput() { return StringVector(); }
 
-	/** Dedicated worlds, on deployments that have somewhere to put one.
-
-	    False everywhere except a web build whose page has been given a manager
-	    to talk to, which is what keeps the button off github.io without a
-	    second build: the page decides, the same way it decides whether there is
-	    a lobby or a relay at all. Asking here rather than testing for a URL
-	    keeps the screen free of anything web-shaped.
-
-	    createServer() is fire-and-poll for the same reason the dialogs are: the
-	    answer comes back over the network whenever it comes back, and a screen
-	    that polls is a screen that never blocks a frame. Status follows the
-	    USERINPUT convention -- NOTINITED while it is still going. */
-	virtual bool canCreateServers() { return false; }
-	virtual void createServer(const std::string& name, const std::string& mode,
-	                          const std::string& seed, const std::string& password) {}
-	virtual int  createServerStatus() { return 0; }
-
-	/** Managing one that already exists.
-
-	    Keyed by the route the game dials rather than by any id of the manager's,
-	    because a route is the only handle the game has ever held. The page knows
-	    both and does the translation.
-
-	    canManageServer() is what keeps a Delete button off a world somebody else
-	    made: asked before the button is drawn, so a stranger's world has no
-	    button rather than one that answers 403 when pressed. */
-	virtual bool canManageServer(unsigned int route) { return false; }
-	virtual void deleteServer(unsigned int route) {}
-	virtual void configureServer(unsigned int route, const std::string& name,
-	                             const std::string& password, bool setPassword) {}
-
-	/** Offering a password for a locked server, before joining it.
-
-	    Before this, the page noticed the first datagram to a locked route and
-	    put a prompt up -- by which time RakNet was already counting down its
-	    connection attempt, and it gives up long before anybody finds the
-	    password and types it. Asked beforehand, nothing is counting. */
-	virtual void unlockServer(unsigned int route, const std::string& password) {}
-
-	/** Whether a password for this server has already been typed once.
-
-	    An empty password to unlockServer() then means "use that one". The game
-	    never has the secret itself, which is the right way round -- the page is
-	    what stored it -- and it cannot be confused with somebody submitting a
-	    blank field, because the screen refuses to send one. */
-	virtual bool hasServerPassword(unsigned int route) { return false; }
-
 	virtual std::string getDateString(int s) { return ""; }
 	//virtual void createUserInputScreen(const char* types) {}
 

@@ -45,29 +45,6 @@ public:
 	int getUserInputStatus();
 	StringVector getUserInput();
 
-	/** Raising and dropping the soft keyboard, which on this target means
-	    focusing and blurring an off-screen input in the page.
-
-	    Only a phone needs it: a desktop browser sends SDL_TEXTINPUT for anything
-	    typed at the canvas, so showKeyboard() there is a call that costs nothing
-	    and changes nothing. See AppPlatform_sdl_dialog_web.cpp. */
-	void showKeyboard();
-	void hideKeyboard();
-
-	/// Dedicated worlds, when the page has been given a manager to talk to.
-	bool canCreateServers();
-	void createServer(const std::string& name, const std::string& mode,
-	                  const std::string& seed, const std::string& password);
-	int  createServerStatus();
-
-	bool canManageServer(unsigned int route);
-	void deleteServer(unsigned int route);
-	void configureServer(unsigned int route, const std::string& name,
-	                     const std::string& password, bool setPassword);
-
-	void unlockServer(unsigned int route, const std::string& password);
-	bool hasServerPassword(unsigned int route);
-
 	BinaryBlob readAssetFile(const std::string& filename);
 	TextureData loadTexture(const std::string& filename_, bool textureFolder);
 	void saveScreenshot(const std::string& filename, int glWidth, int glHeight);

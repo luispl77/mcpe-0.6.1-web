@@ -3,7 +3,7 @@
 #include <string.h>
 #include <stdlib.h>
 ArgumentsSettings::ArgumentsSettings(int numArguments, char** arguments)
-: externalPath("."), levelName("level"), showHelp(false), port(19132), serverKey(""), cachePath("."), levelDir("level"), gameType(1), seed("") {
+: externalPath("."), levelName("level"), showHelp(false), port(19132), serverKey(""), cachePath("."), levelDir("level") {
 	for(int a = 0; a < numArguments; ++a) {
 		if(strcmp(arguments[a], "--help") == 0) {
 			showHelp = true;
@@ -25,18 +25,6 @@ ArgumentsSettings::ArgumentsSettings(int numArguments, char** arguments)
 		} else if(strcmp(arguments[a], "--port") == 0) {
 			if(a + 1 < numArguments) {
 				port = atoi(arguments[a+1]);
-				a++; // Skip the next argument since it's part of this one.
-			}
-		} else if(strcmp(arguments[a], "--seed") == 0) {
-			if(a+1 < numArguments) {
-				seed = std::string(arguments[a+1]);
-				a++; // Skip the next argument since it's part of this one.
-			}
-		} else if(strcmp(arguments[a], "--gamemode") == 0) {
-			if(a+1 < numArguments) {
-				// Spelled out rather than 0/1, because a server started with the
-				// wrong number is a world that has to be made again.
-				gameType = strcmp(arguments[a+1], "survival") == 0 ? 0 : 1;
 				a++; // Skip the next argument since it's part of this one.
 			}
 		} else if(strcmp(arguments[a], "--serverkey") == 0) {
@@ -69,14 +57,6 @@ std::string ArgumentsSettings::getLevelDir() {
 bool ArgumentsSettings::getShowHelp() {
 	return showHelp;
 }
-std::string ArgumentsSettings::getSeed() {
-	return seed;
-}
-
-int ArgumentsSettings::getGameType() {
-	return gameType;
-}
-
 int ArgumentsSettings::getPort() {
 	return port;
 }

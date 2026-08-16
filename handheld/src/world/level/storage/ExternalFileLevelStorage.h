@@ -44,15 +44,6 @@ public:
     ChunkStorage* createChunkStorage(Dimension* dimension) { return this; }
 
     void saveLevelData(LevelData& levelData, std::vector<Player*>* players);
-
-	/// One file per player under <level>/players/, so a dedicated world can put
-	/// everybody back where they left off rather than only its first player.
-	bool loadPlayerData(const std::string& name, Player* player);
-	void savePlayerData(const std::string& name, Player* player);
-
-	/// A player name reduced to something safe to be a filename. Empty if there
-	/// is nothing left of it, which is the signal not to save at all.
-	static std::string playerFileName(const std::string& name);
     // PlayerIO getPlayerIO() { return this; }
 	// CompoundTag loadPlayerDataTag(std::string playerName) { return NULL; }
 

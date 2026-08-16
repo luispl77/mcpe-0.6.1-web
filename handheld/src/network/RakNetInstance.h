@@ -20,14 +20,6 @@ typedef struct PingedCompatibleServer
 	RakNet::SystemAddress address;
 	RakNet::TimeMS pingTime;
 	bool isSpecial;
-#if defined(MC_WASM)
-	/* What kind of entry this is, which on a LAN is not a question worth asking
-	 * -- everything there is somebody's phone. Here half the board is worlds
-	 * that outlive whoever made them, and a row that cannot say which is which
-	 * is a row that reads as eight identical games. */
-	bool isDedicated;
-	bool isLocked;
-#endif
 } PingedCompatibleServer;
 typedef std::vector<PingedCompatibleServer> ServerList;
 

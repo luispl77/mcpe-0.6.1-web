@@ -68,30 +68,7 @@ int getTimeMs() {
 }
 
 void sleepMs(int ms) {
-#if defined(MC_WASM)
-	/* Nothing, on purpose.
-
-	   Both callers are frame-rate throttles in the render path -- 15ms a frame
-	   in GameRenderer, 50ms a frame on the loading screen -- and on a phone in
-	   2013 that is exactly right: it caps the frame rate, saves battery, and
-	   hands the CPU to the other threads while it waits.
-
-	   A tab has no other threads to hand it to, and the browser is already
-	   pacing frames through requestAnimationFrame. What is left is the waiting,
-	   and Emscripten cannot implement that by yielding: usleep on the main
-	   thread becomes emscripten_thread_sleep, which *spins* on the clock until
-	   the deadline. So a frame cap meant to leave the CPU alone became the
-	   single hottest thing in the profile -- 30% of all samples during a
-	   multiplayer join, every one of them burnt reading performance.now() in a
-	   loop -- and it lengthened the very frames it was pacing.
-
-	   That is worse here than a wasted frame, because Minecraft::update() pumps
-	   RakNet exactly once per frame. Slower frames are a slower network: while
-	   the loading screen span at 50ms a frame, RakNet got a few opportunities a
-	   second to send, resend and drain its socket, which is what made a block
-	   placed just after joining appear seconds later. */
-	(void)ms;
-#elif defined(WIN32)
+#ifdef WIN32
     Sleep(ms);
 #else
 	usleep(ms * 1000);

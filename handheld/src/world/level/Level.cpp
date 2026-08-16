@@ -500,27 +500,6 @@ int Level::getTopTileY(int x, int z) {
 
 void Level::saveLevelData() {
 	levelStorage->saveLevelData(levelData, &players);
-	// Everybody, not just players[0], and at every moment the level itself is
-	// written -- so an idle world being reaped or a process going down keeps
-	// where people were, not only where the first of them was.
-	saveAllPlayerData();
-}
-
-bool Level::loadPlayerData(Player* player) {
-	if (!player || player->name.empty())
-		return false;
-	return levelStorage->loadPlayerData(player->name, player);
-}
-
-void Level::savePlayerData(Player* player) {
-	if (!player || player->name.empty())
-		return;
-	levelStorage->savePlayerData(player->name, player);
-}
-
-void Level::saveAllPlayerData() {
-	for (unsigned int i = 0; i < players.size(); ++i)
-		savePlayerData(players[i]);
 }
 
 //    bool pauseSave(int step) {

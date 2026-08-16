@@ -98,13 +98,6 @@ private:
 	int sentInventoryItemId;
 	int sentInventoryItemData;
 
-	/// The whole-inventory report to the server (see SendInventoryPacket):
-	/// what was last sent, and a countdown so comparing is done at 0.5Hz
-	/// rather than every tick.
-	std::vector<ItemInstance> sentInventory;
-	char sentInventoryLinks[9];
-	int sentInventoryDelay;
-
 	int armorTypeHash;
 };
 

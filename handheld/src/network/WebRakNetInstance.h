@@ -42,13 +42,6 @@ void mcpeLobbySetWorld(const std::string& worldName);
     degrades to exactly what the build did before: the list still fills from the
     lobby if there is one, host() announces, and connect() refuses. That is what
     github.io serves. */
-/** The relay slot an address was built out of.
-
-    Declared here because the menus need it: a row in the games list carries an
-    address, and every call that manages a dedicated world names it by route
-    instead. Defined in WebRakNetInstance.cpp. */
-unsigned int mcpeRouteOf(const RakNet::SystemAddress& address);
-
 class WebRakNetInstance : public IRakNetInstance
 {
 public:

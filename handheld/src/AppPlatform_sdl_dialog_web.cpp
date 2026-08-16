@@ -23,27 +23,17 @@
     having answered yet was always a state they sat in quite happily -- it simply
     never lasted longer than one frame before. */
 
-/** Opens the overlay. A field whose label is empty is not shown.
-
-    `mask` is a bitmask of the fields that should be typed into blind -- bit 0
-    for the first, bit 1 for the second. A bitmask rather than another pair of
-    parameters because this signature is already at the edge of what is readable
-    for two fields, and nothing here has ever wanted three. */
+/// Opens the overlay. A field whose label is empty is not shown.
 EM_JS(void, mcpe_dialog_open, (const char* title, const char* okLabel,
                                const char* label0, const char* value0,
-                               const char* label1, const char* value1,
-                               const char* label2, const char* value2,
-                               const char* label3, const char* value3,
-                               int mask), {
+                               const char* label1, const char* value1), {
 	if (!window.mcpeDialog) return;
 	window.mcpeDialog.open({
 		title:   UTF8ToString(title),
 		okLabel: UTF8ToString(okLabel),
 		fields: [
-			{ label: UTF8ToString(label0), value: UTF8ToString(value0), password: (mask & 1) !== 0 },
-			{ label: UTF8ToString(label1), value: UTF8ToString(value1), password: (mask & 2) !== 0 },
-			{ label: UTF8ToString(label2), value: UTF8ToString(value2), password: (mask & 4) !== 0 },
-			{ label: UTF8ToString(label3), value: UTF8ToString(value3), password: (mask & 8) !== 0 }
+			{ label: UTF8ToString(label0), value: UTF8ToString(value0) },
+			{ label: UTF8ToString(label1), value: UTF8ToString(value1) }
 		].filter(function (f) { return f.label !== ''; })
 	});
 });
@@ -66,20 +56,16 @@ EM_JS(char*, mcpe_dialog_value, (int index), {
 	return buf;
 });
 
-/// Copies a malloc'd string out of JS and frees it, so nothing leaks past here.
-static std::string takeString(char* raw)
+/// Wraps mcpe_dialog_value so the malloc'd result can't leak past the copy.
+static std::string takeValue(int index)
 {
+	char* raw = mcpe_dialog_value(index);
 	if (!raw)
 		return std::string();
 
 	std::string out = raw;
 	free(raw);
 	return out;
-}
-
-static std::string takeValue(int index)
-{
-	return takeString(mcpe_dialog_value(index));
 }
 
 void AppPlatform_sdl::showDialog(int dialogId)
@@ -96,17 +82,17 @@ void AppPlatform_sdl::showDialog(int dialogId)
 		_dialogFields = 2;
 		mcpe_dialog_open("Create world", "Create",
 		                 "World name", "World",
-		                 "Seed (blank for random)", "", "", "", "", "", 0);
+		                 "Seed (blank for random)", "");
 		break;
 
 	case DialogDefinitions::DIALOG_RENAME_MP_WORLD:
 		_dialogFields = 1;
-		mcpe_dialog_open("Rename world", "Rename", "New name", "", "", "", "", "", "", "", 0);
+		mcpe_dialog_open("Rename world", "Rename", "New name", "", "", "");
 		break;
 
 	case DialogDefinitions::DIALOG_NEW_CHAT_MESSAGE:
 		_dialogFields = 1;
-		mcpe_dialog_open("Chat", "Send", "Message", "", "", "", "", "", "", "", 0);
+		mcpe_dialog_open("Chat", "Send", "Message", "", "", "");
 		break;
 
 	default:
@@ -144,131 +130,4 @@ int AppPlatform_sdl::getUserInputStatus()
 StringVector AppPlatform_sdl::getUserInput()
 {
 	return _userInput;
-}
-
-/* ---------------------------------------------------------------------------
- * Dedicated worlds
- *
- * The page holds the manager's URL for the same reason it holds LOBBY_URL and
- * RELAY_URL: which service a deployment talks to is a property of where it is
- * deployed, not of the build. github.io leaves it empty, window.mcpeServers is
- * never defined there, and the button this feeds simply is not on the screen --
- * one wasm, two deployments, no compile flag.
- * ------------------------------------------------------------------------- */
-
-EM_JS(int, mcpe_servers_enabled, (), {
-	return (window.mcpeServers && window.mcpeServers.enabled()) ? 1 : 0;
-});
-
-EM_JS(void, mcpe_servers_create, (const char* name, const char* mode, const char* seed, const char* password), {
-	if (window.mcpeServers)
-		window.mcpeServers.create(UTF8ToString(name), UTF8ToString(mode), UTF8ToString(seed), UTF8ToString(password));
-});
-
-/// USERINPUT_NOTINITED while the request is in flight, then OK or CANCEL.
-EM_JS(int, mcpe_servers_status, (), {
-	return window.mcpeServers ? window.mcpeServers.status() : 0;
-});
-
-bool AppPlatform_sdl::canCreateServers()
-{
-	return mcpe_servers_enabled() != 0;
-}
-
-void AppPlatform_sdl::createServer(const std::string& name, const std::string& mode,
-                                   const std::string& seed, const std::string& password)
-{
-	mcpe_servers_create(name.c_str(), mode.c_str(), seed.c_str(), password.c_str());
-}
-
-int AppPlatform_sdl::createServerStatus()
-{
-	return mcpe_servers_status();
-}
-
-EM_JS(int, mcpe_servers_can_manage, (unsigned int route), {
-	return (window.mcpeServers && window.mcpeServers.canManage(route)) ? 1 : 0;
-});
-
-EM_JS(void, mcpe_servers_remove, (unsigned int route), {
-	if (window.mcpeServers) window.mcpeServers.remove(route);
-});
-
-/* setPassword separates "clear it" from "leave it alone", which an empty
- * string cannot: renaming a world must not also demand that somebody retype a
- * password they never wrote down. Null on the page's side is "leave it". */
-EM_JS(void, mcpe_servers_configure, (unsigned int route, const char* name,
-                                     const char* password, int setPassword), {
-	if (window.mcpeServers)
-		window.mcpeServers.configure(route, UTF8ToString(name),
-		                             setPassword ? UTF8ToString(password) : null);
-});
-
-bool AppPlatform_sdl::canManageServer(unsigned int route)
-{
-	return mcpe_servers_can_manage(route) != 0;
-}
-
-void AppPlatform_sdl::deleteServer(unsigned int route)
-{
-	mcpe_servers_remove(route);
-}
-
-void AppPlatform_sdl::configureServer(unsigned int route, const std::string& name,
-                                      const std::string& password, bool setPassword)
-{
-	mcpe_servers_configure(route, name.c_str(), password.c_str(), setPassword ? 1 : 0);
-}
-
-EM_JS(void, mcpe_servers_unlock, (unsigned int route, const char* password), {
-	if (window.mcpeServers) window.mcpeServers.unlock(route, UTF8ToString(password));
-});
-
-EM_JS(int, mcpe_servers_has_password, (unsigned int route), {
-	return (window.mcpeServers && window.mcpeServers.hasPassword(route)) ? 1 : 0;
-});
-
-void AppPlatform_sdl::unlockServer(unsigned int route, const std::string& password)
-{
-	mcpe_servers_unlock(route, password.c_str());
-}
-
-bool AppPlatform_sdl::hasServerPassword(unsigned int route)
-{
-	return mcpe_servers_has_password(route) != 0;
-}
-
-/* ---------------------------------------------------------------------------
- * The soft keyboard
- *
- * A field the game draws itself takes its characters from SDL_TEXTINPUT, which
- * a desktop browser delivers the moment the canvas has focus -- so on a desktop
- * there is nothing to do here at all.
- *
- * A phone delivers nothing, and not because of anything SDL does: a touch
- * device raises its keyboard for a focused form control and for nothing else,
- * and a <canvas> is not one. So the page keeps an input off screen, this is
- * what focuses it, and what gets typed comes back through mcpe_feed_text into
- * the same queue SDL_TEXTINPUT feeds. The screens cannot tell the difference,
- * which is the point.
- * ------------------------------------------------------------------------- */
-
-EM_JS(void, mcpe_keyboard_show, (), {
-	if (window.mcpeKeyboard) window.mcpeKeyboard.show();
-});
-
-EM_JS(void, mcpe_keyboard_hide, (), {
-	if (window.mcpeKeyboard) window.mcpeKeyboard.hide();
-});
-
-void AppPlatform_sdl::showKeyboard()
-{
-	mcpe_keyboard_show();
-	AppPlatform::showKeyboard();
-}
-
-void AppPlatform_sdl::hideKeyboard()
-{
-	mcpe_keyboard_hide();
-	AppPlatform::hideKeyboard();
 }

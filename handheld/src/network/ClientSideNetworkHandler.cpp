@@ -844,36 +844,6 @@ void ClientSideNetworkHandler::handle(const RakNet::RakNetGUID& source, Containe
 		minecraft->player->closeContainer();
 }
 
-void ClientSideNetworkHandler::handle(const RakNet::RakNetGUID& source, SendInventoryPacket* packet)
-{
-	/* The server, on login, saying what this world remembers us carrying --
-	   the reply to Level::loadPlayerData on the other end. The client is
-	   otherwise the authority on its own items, so this is only believed
-	   about ourselves, and the drop flag is ignored in this direction: a
-	   server has no business emptying our hands, and a stray flag emptying
-	   them silently is the kind of bug nobody ever finds. */
-	if (!minecraft || !minecraft->player)
-		return;
-	if (packet->entityId != minecraft->player->entityId)
-		return;
-
-	Inventory* inv = minecraft->player->inventory;
-	inv->replace(packet->items, packet->numItems);
-
-	for (int i = 0; i < SendInventoryPacket::NumArmorItems; ++i) {
-		if (packet->numItems + i >= (int)packet->items.size()) break;
-		ItemInstance& item = packet->items[packet->numItems + i];
-		minecraft->player->setArmor(i, item.isNull()? NULL : &item);
-	}
-
-	if ((packet->extra & SendInventoryPacket::ExtraLinks) != 0) {
-		for (int i = 0; i < SendInventoryPacket::NumLinks; ++i)
-			if (packet->links[i] >= Inventory::MAX_SELECTION_SIZE)
-				inv->linkSlot(i, packet->links[i], false);
-		inv->compressLinkedSlotList(0);
-	}
-}
-
 void ClientSideNetworkHandler::handle(const RakNet::RakNetGUID& source, ContainerSetContentPacket* packet)
 {
 	if (!minecraft || !minecraft->player)

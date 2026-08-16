@@ -155,10 +155,6 @@ void ServerSideNetworkHandler::onDisconnect(const RakNet::RakNetGUID& guid)
 			message += " disconnected from the game";
 			displayGameMessage(message);
 
-			// While we still have them. Two lines further down the entity is
-			// removed from the level and there is nothing left to write.
-			level->savePlayerData(player);
-
 			//RemoveEntityPacket packet(player->entityId);
 			//raknetInstance->send(packet);
 			player->reallyRemoveIfPlayer = true;
@@ -204,20 +200,6 @@ void ServerSideNetworkHandler::handle(const RakNet::RakNetGUID& source, LoginPac
 	newPlayer->owner = source;
 	newPlayer->name = packet->clientName.C_String();
 	_pendingPlayers.push_back(newPlayer);
-
-	/* Where they left off, if this world has ever seen them.
-	 *
-	 * A ServerPlayer is constructed at the world spawn and, until now, stayed
-	 * there: nothing on this path ever looked anything up, so every join was a
-	 * first join. False here means exactly that -- nobody by this name has
-	 * saved in this world -- and the spawn position it was already given
-	 * stands.
-	 *
-	 * Before the nudge below on purpose. That loop only moves somebody who
-	 * would be standing inside a solid block, which is worth keeping for a
-	 * restored position too: a world can change under you while you are away,
-	 * and being lifted out of new stone beats suffocating in it. */
-	level->loadPlayerData(newPlayer);
 
 	// Reset the player so he doesn't spawn inside blocks
 	while (newPlayer->y > 0) {
@@ -296,23 +278,6 @@ void ServerSideNetworkHandler::onReady_ClientGeneration(const RakNet::RakNetGUID
 #else
 	LOGW("%s joined the game\n", newPlayer->name.c_str());
 #endif
-
-	/* What this world remembers them carrying, from loadPlayerData at login.
-	 *
-	 * The client builds its player from StartGamePacket alone, which has no
-	 * items in it, so without this a rejoin restored where you stood and not
-	 * what you held. Sent here rather than with StartGame because this is the
-	 * moment the client has provably built its level and player -- it just
-	 * said so.
-	 *
-	 * Not in creative, where the inventory is the palette: the save file
-	 * deliberately keeps no items for creative players (FillingContainer::save
-	 * skips them), so there is nothing remembered to send. */
-	if (!minecraft->isCreativeMode()) {
-		bitStream.Reset();
-		SendInventoryPacket(newPlayer, false).write(&bitStream);
-		rakPeer->Send(&bitStream, HIGH_PRIORITY, RELIABLE_ORDERED, 0, source, false);
-	}
 
 	// Send all Entities to the new player
 	for (unsigned int i = 0; i < level->entities.size(); ++i) {
@@ -605,31 +570,7 @@ void ServerSideNetworkHandler::handle( const RakNet::RakNetGUID& source, SendInv
 	Entity* entity = level->getEntity(packet->entityId);
 	if (entity && entity->isPlayer()) {
 		Player* p = (Player*)entity;
-		// Only the connection a player belongs to may say what they carry.
-		// The entity id in the packet is whatever the sender wrote there, and
-		// this is now the ordinary way inventories change on the server rather
-		// than a death-only message, so it has to stop being a way to rewrite
-		// somebody else's.
-		if (!(p->owner == source)) return;
-
 		p->inventory->replace(packet->items, packet->numItems);
-
-		// Armor rode along in this packet from the start; only the drop-out
-		// path ever looked at it. Keep it, so the save file knows.
-		for (int i = 0; i < SendInventoryPacket::NumArmorItems; ++i) {
-			if (packet->numItems + i >= (int)packet->items.size()) break;
-			ItemInstance& item = packet->items[packet->numItems + i];
-			p->setArmor(i, item.isNull()? NULL : &item);
-		}
-
-		// The hotbar layout, the same way load() restores it from disk.
-		if ((packet->extra & SendInventoryPacket::ExtraLinks) != 0) {
-			for (int i = 0; i < SendInventoryPacket::NumLinks; ++i)
-				if (packet->links[i] >= Inventory::MAX_SELECTION_SIZE)
-					p->inventory->linkSlot(i, packet->links[i], false);
-			p->inventory->compressLinkedSlotList(0);
-		}
-
 		if ((packet->extra & SendInventoryPacket::ExtraDrop) != 0) {
 			p->inventory->dropAll(false);
             //@todo @armor : Drop armor

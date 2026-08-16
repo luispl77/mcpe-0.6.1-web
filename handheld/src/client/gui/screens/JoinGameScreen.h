@@ -63,17 +63,9 @@ public:
 
 	bool isInGameScreen();
 private:
-	/// What the New Server button is waiting for, if anything.
-
 	Button bJoin;
 	Button bBack;
-	Button bCreate;
 	AvailableGamesList* gamesList;
-
-	/* Only on a deployment that has somewhere to make one. Latched in init()
-	 * rather than asked every frame, so the button cannot appear and vanish
-	 * under a thumb if the page is still working out what it can do. */
-	bool _canCreate;
 };
 
 #endif /*NET_MINECRAFT_CLIENT_GUI_SCREENS__JoinGameScreen_H__*/

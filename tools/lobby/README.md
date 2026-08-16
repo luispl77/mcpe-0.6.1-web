@@ -35,81 +35,9 @@ browser will not let an https page open a `ws://` socket or fetch `http://`.
 | Route | |
 |---|---|
 | `GET /` | what this is, how many are on it, how many sockets it holds |
-| `GET /list` | `{players: [{id, name, world, route, age, dedicated?, locked?}]}` |
+| `GET /list` | `{players: [{id, name, world, route, age}]}` |
 | `POST /announce` | `{id, name, world, route, token}`, or `{id, gone: true}` |
-| `POST /unlock` | `{route, token, server, password}` — opens a locked server |
 | `GET /relay` (upgrade) | the datagram switch |
-
-## Dedicated servers
-
-A world that is not anybody's tab. `MCPE_LOBBY_SERVERS` points at a JSON file:
-
-```json
-[{"id": "skyblock", "name": "Skyblock", "world": "creative",
-  "host": "127.0.0.1", "port": 19150,
-  "salt": "…", "passwordHash": "sha256(salt + password), hex"}]
-```
-
-It is read at startup and on **SIGHUP** — a reload rather than a restart,
-because restarting would drop every player already in a world. Absent or
-unparseable means there are no dedicated servers and everything else works as
-before, the same way an absent relay means no multiplayer rather than an error.
-
-A server holds a reserved route and sits in the switching table beside the tabs,
-so **a player addresses it exactly the way they address another player**, and
-the game does not need to know the difference — an unmodified client lists and
-joins one already. Its route is stable across reloads as long as its `id` is.
-
-What is behind the route is UDP on this box, and the bridge holds **one socket
-per (server, player)** rather than one per server. That is not thrift, it is
-correctness: the game keys remote systems by `SystemAddress`, which is address
-*and* port, so a shared socket would present every player as the same peer and
-the second one to connect would look like the first having a very strange time.
-Distinct ephemeral ports give the server distinct peers without the bridge
-forging anything — which it could not do without raw sockets and root anyway.
-
-`MCPE_BRIDGE_MAX` (400 sockets) and `MCPE_BRIDGE_IDLE` (60000 ms) bound that
-product. Idle expiry matters because the event that should close a bridge socket
-— a player leaving — arrives as a WebSocket close, and RakNet never says a word
-about it.
-
-Servers are counted separately from tabs everywhere it matters. They live in the
-routing table but they are not connections, so they do not show up in
-`connected` and do not consume `MCPE_RELAY_MAX`; registering one must not
-quietly lower how many people can be in a world.
-
-A reload keeps the bridge sockets of any server whose `host:port` has not
-moved. The file is rewritten on every change to any world, and closing the
-peers on each reload made every one of those a kick: the next datagram left
-from a fresh port, and RakNet — which keys peers by address *and* port — met a
-stranger mid-game.
-
-### Telling the manager about traffic
-
-`MCPE_LOBBY_MANAGER` names the manager's HTTP address (empty disables this and
-nothing else). The switch is the only thing that can see which servers
-datagrams actually flow at, so it POSTs `/seen` there: once a minute per
-active server (`MCPE_LOBBY_SEEN_MS`), and immediately — floored at once per
-3 s — for a server whose file entry says `up: false`, because a join is waiting
-on that wake and RakNet only retries for about six seconds. Without this the
-manager counts idleness from the wrong clock and puts worlds to sleep under
-their players.
-
-### Passwords
-
-`passwordHash` is `sha256(salt + password)` in hex, and empty means the server is
-open. The gate is **here, not in the game**: a locked server's datagrams are
-dropped by the switch until that socket has posted the right password to
-`/unlock`, so being refused costs a stranger a datagram rather than a seat, and
-0.6.1's protocol — whose `LoginPacket` carries a name and two version numbers and
-nothing else — does not have to grow a field it never had.
-
-The unlock is bound to the relay socket that asked for it, by the same token
-pairing `/announce` uses. One player knowing the password does not open the
-server for anybody else, and nothing about it survives that socket closing.
-Attempts are counted per socket rather than per address, because behind a phone
-network or a school an address is everybody and locking them all out for one
-guesser is the wrong failure.
 
 ## The switch
 
@@ -177,49 +105,6 @@ location / {
     proxy_read_timeout 3600s;                        # a relay socket is long-lived
 }
 ```
-
-When you check that the upgrade really does pass, **force HTTP/1.1**:
-
-```sh
-curl -s --http1.1 --max-time 8 -o /dev/null -w '%{http_code}\n' \
-  -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
-  -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
-  https://host/lobby/relay
-```
-
-Without `--http1.1` curl negotiates h2, where `Connection` and `Upgrade` are not
-valid headers and are dropped — so the request arrives as an ordinary GET and
-the service answers `404`, which looks exactly like a proxy that is eating the
-upgrade. `--max-time` matters too: a real `101` holds the socket open, so the
-success case is a timeout with `101` already printed.
-
-### The CDN must not outlive a deploy
-
-The service sends `Cache-Control: no-cache` for every file it serves, and it
-means it: `sync-from-pages.sh` replaces all four in place under the same names,
-so a browser holding an old one has no way to notice.
-
-A CDN in front can quietly override that, and it will not override it evenly.
-Cloudflare's zone **Browser Cache TTL** applies to responses it considers
-cacheable, which is decided by file extension: `.js` is on that list, `.data` and
-`.wasm` are not. On 2026-08-14 that meant a returning player revalidated the data
-package and reused a four-hour-old `minecraftpe.js`, and Emscripten's loader
-**hangs at `Downloading data... (N/N)`** when the two are from different builds —
-the package arrives, the runtime never starts, and nothing in the console says
-why. It looks exactly like a broken build and is not one.
-
-The zone now carries a cache rule scoped to `mcpe.continualmi.com` setting
-browser TTL to *respect origin*, which is the only setting under which the
-`no-cache` above is true. Check it after any CDN change:
-
-```sh
-for f in minecraftpe.js minecraftpe.data; do
-    curl -sI https://host/$f | grep -i '^cache-control'
-done
-```
-
-**Both must say the same thing.** If they disagree, the deployment can hand out
-half of one build and half of another, and the symptom will not point here.
 
 `MCPE_LOBBY_TRUST_PROXY=1` makes it believe `X-Forwarded-For`. Leave it **off**
 unless something we control is in front, because the header is client-supplied

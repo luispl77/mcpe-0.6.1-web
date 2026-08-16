@@ -1,16 +1,13 @@
 #include "JoinGameScreen.h"
 #include "StartMenuScreen.h"
 #include "ProgressScreen.h"
-#include "CreateServerScreen.h"
 #include "../Font.h"
 #include "../../../network/RakNetInstance.h"
 
 JoinGameScreen::JoinGameScreen()
 :	bJoin(  2, "Join Game"),
 	bBack(  3, "Back"),
-	bCreate(4, "New Server"),
-	gamesList(NULL),
-	_canCreate(false)
+	gamesList(NULL)
 {
 	bJoin.active = false;
 	//gamesList->yInertia = 0.5f;
@@ -38,12 +35,6 @@ void JoinGameScreen::buttonClicked(Button* button)
 		//minecraft->locateMultiplayer();
 		//minecraft->setScreen(new JoinGameScreen());
 	}
-	if (button->id == bCreate.id)
-	{
-		// A screen of the game's own rather than a panel in the page; it owns
-		// the whole exchange and comes back here when it is done.
-		minecraft->setScreen(new CreateServerScreen());
-	}
 	if (button->id == bBack.id)
 	{
 		minecraft->cancelLocateMultiplayer();
@@ -69,8 +60,6 @@ bool JoinGameScreen::isIndexValid( int index )
 
 void JoinGameScreen::tick()
 {
-	bCreate.active = _canCreate;
-
 	const ServerList& orgServerList = minecraft->raknetInstance->getServerList();
 	ServerList serverList;
 	for (unsigned int i = 0; i < orgServerList.size(); ++i)
@@ -119,13 +108,6 @@ void JoinGameScreen::init()
 	buttons.push_back(&bJoin);
 	buttons.push_back(&bBack);
 
-	/* Absent rather than greyed out where there is nowhere to make one. On
-	 * github.io there is no manager, so this is not a disabled button the
-	 * player can wonder about -- it is a screen that looks exactly like it did
-	 * before any of this existed. */
-	_canCreate = minecraft->platform()->canCreateServers();
-	if (_canCreate) buttons.push_back(&bCreate);
-
 	minecraft->raknetInstance->clearServerList();
 	gamesList = new AvailableGamesList(minecraft, width, height);
 
@@ -148,13 +130,6 @@ void JoinGameScreen::setupPositions() {
 	// Center buttons
 	bJoin.x = width / 2 - 4 - bJoin.width;
 	bBack.x = width / 2 + 4;
-
-	/* Above the other two rather than beside them: the row is already two
-	 * 120-wide buttons on a 480-wide phone, and a third would either overlap
-	 * or push Join somewhere the thumb does not expect it. */
-	bCreate.width = 120;
-	bCreate.x = width / 2 - bCreate.width / 2;
-	bCreate.y = yBase - 24;
 }
 
 void JoinGameScreen::render( int xm, int ym, float a )

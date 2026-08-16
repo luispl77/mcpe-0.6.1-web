@@ -25,24 +25,6 @@ void Screen::render( int xm, int ym, float a )
 		Button* button = buttons[i];
 		button->render(minecraft, xm, ym);
 	}
-	for (unsigned int i = 0; i < textBoxes.size(); i++)
-		textBoxes[i]->render(minecraft, xm, ym);
-}
-
-bool Screen::textBoxAt( int x, int y )
-{
-	for (unsigned int i = 0; i < textBoxes.size(); ++i)
-		if (textBoxes[i]->isInside(x, y))
-			return true;
-	return false;
-}
-
-TextBox* Screen::focusedTextBox()
-{
-	for (unsigned int i = 0; i < textBoxes.size(); ++i)
-		if (textBoxes[i]->focused)
-			return textBoxes[i];
-	return NULL;
 }
 
 void Screen::init( Minecraft* minecraft, int width, int height )
@@ -118,13 +100,6 @@ void Screen::keyboardTextEvent()
 {
 	keyboardNewChar(Keyboard::getChar());
 }
-
-void Screen::keyboardNewChar( char inputChar )
-{
-	TextBox* field = focusedTextBox();
-	if (field)
-		field->charTyped(inputChar);
-}
 void Screen::renderBackground()
 {
 	renderBackground(0);
@@ -178,19 +153,6 @@ bool Screen::closeOnPlayerHurt() {
 
 void Screen::keyPressed( int eventKey )
 {
-	/* A focused field eats the key. Escape gives up the field rather than the
-	 * screen: a form somebody is halfway through is not a thing to throw away
-	 * on the key they press to dismiss a keyboard. */
-	TextBox* field = focusedTextBox();
-	if (field) {
-		if (eventKey == Keyboard::KEY_ESCAPE) {
-			field->loseFocus(minecraft);
-			return;
-		}
-		field->keyPressed(eventKey);
-		return;
-	}
-
 	if (eventKey == Keyboard::KEY_ESCAPE) {
 		minecraft->setScreen(NULL);
 		//minecraft->grabMouse();
@@ -230,21 +192,6 @@ void Screen::updateTabButtonSelection()
 
 void Screen::mouseClicked( int x, int y, int buttonNum )
 {
-	/* Blur first and focus second, in two passes rather than one: loseFocus()
-	 * asks the platform to put the keyboard away, so doing them in list order
-	 * would let a field below the tapped one hide the keyboard that the tap had
-	 * just raised. */
-	if (buttonNum == MouseAction::ACTION_LEFT && !textBoxes.empty()) {
-		TextBox* hit = NULL;
-		for (unsigned int i = 0; i < textBoxes.size(); ++i)
-			if (textBoxes[i]->isInside(x, y)) hit = textBoxes[i];
-
-		for (unsigned int i = 0; i < textBoxes.size(); ++i)
-			if (textBoxes[i] != hit) textBoxes[i]->loseFocus(minecraft);
-
-		if (hit) hit->setFocus(minecraft);
-	}
-
 	if (buttonNum == MouseAction::ACTION_LEFT) {
 		for (unsigned int i = 0; i < buttons.size(); ++i) {
 			Button* button = buttons[i];

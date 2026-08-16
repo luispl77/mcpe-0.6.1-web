@@ -112,7 +112,6 @@ namespace {
 /// still reads like a Minecraft address.
 const unsigned short RELAY_PORT = 19132;
 
-
 /** A relay slot, encoded as an address RakNet will accept.
 
     RakNet keys every remote system by SystemAddress, so a peer needs one even
@@ -195,17 +194,6 @@ public:
 WebRelayTransport g_transport;
 
 } // namespace
-
-/** The relay slot an address was built out of.
-
-    A thin wrapper over the file-local routeFromAddress() because the menus
-    need it and everything else in that anonymous namespace is this file's own
-    business: a row in the games list carries an address, and every call that
-    manages a dedicated world names it by route instead. */
-unsigned int mcpeRouteOf(const RakNet::SystemAddress& address)
-{
-	return routeFromAddress(address);
-}
 
 WebRakNetInstance::WebRakNetInstance()
 :	_peer(NULL),
@@ -568,20 +556,9 @@ void WebRakNetInstance::refresh()
 		const std::string::size_type t2 = line.find('\t', t1 + 1);
 		if (t2 == std::string::npos) continue;
 
-		const std::string::size_type t3 = line.find('\t', t2 + 1);
-
 		const std::string name  = line.substr(0, t1);
 		const std::string world = line.substr(t1 + 1, t2 - t1 - 1);
-		const std::string route = t3 == std::string::npos
-			? line.substr(t2 + 1)
-			: line.substr(t2 + 1, t3 - t2 - 1);
-
-		/* A fourth column, absent from a page older than the build. Missing
-		 * means zero means "an ordinary entry", which is what every row was
-		 * before dedicated worlds existed. */
-		const unsigned int flags = t3 == std::string::npos
-			? 0u
-			: (unsigned int) strtoul(line.substr(t3 + 1).c_str(), NULL, 10);
+		const std::string route = line.substr(t2 + 1);
 
 		// JoinGameScreen::tick drops entries with an empty name, so a player
 		// without one would silently never appear.
@@ -592,18 +569,13 @@ void WebRakNetInstance::refresh()
 		if (joinableOnly && routeNumber == 0)
 			continue;
 
-		/* A dedicated world's "world" field is a constant the manager sets, so
-		 * appending it would put " - dedicated" on every one of them. What it
-		 * is gets said by the row instead, which has the flags. */
-		const std::string label = (world.empty() || (flags & 1)) ? name : (name + " - " + world);
+		const std::string label = world.empty() ? name : (name + " - " + world);
 
 		PingedCompatibleServer server;
 		server.name = label.c_str();
 		server.address = addressFromRoute(routeNumber);
 		server.pingTime = 0;
 		server.isSpecial = false;
-		server.isDedicated = (flags & 1) != 0;
-		server.isLocked    = (flags & 2) != 0;
 		_servers.push_back(server);
 	}
 }
