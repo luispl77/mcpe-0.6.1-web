@@ -49,9 +49,12 @@ LocalPlayer::LocalPlayer(Minecraft* minecraft, Level* level, User* user, int dim
 	input(NULL),
 	sentInventoryItemId(-1),
 	sentInventoryItemData(-1),
+	sentInventoryDelay(40),
 	autoJumpEnabled(true),
 	armorTypeHash(0)
 {
+	for (int i = 0; i < 9; ++i)
+		sentInventoryLinks[i] = -1;
 	this->dimension = dimension;
 	_init();
 
@@ -138,6 +141,33 @@ void LocalPlayer::tick() {
 			sentInventoryItemData = newItemData;
 			PlayerEquipmentPacket packet(entityId, newItemId, newItemData);
 			minecraft->raknetInstance->send(packet);
+		}
+
+		/* The whole inventory, when it has changed -- same idiom as the two
+		   sends above, at a coarser grain. The server is what saves player
+		   data for a dedicated world, and in this protocol it is never told
+		   about crafting, container moves or pickups except by us; until this
+		   existed the only full report was the one sent at death, so the save
+		   file held either nothing or the moment everything was lost.
+
+		   Every two seconds, and only the diff decides: a packet per change
+		   would mean one per tick while mining. Not in creative -- the save
+		   file keeps no items for creative players, so there is nothing to
+		   report. */
+		if (level->isClientSide && !minecraft->isCreativeMode()
+		    && --sentInventoryDelay <= 0)
+		{
+			sentInventoryDelay = 40;
+			SendInventoryPacket report(this, false);
+			bool linksSame = true;
+			for (int i = 0; i < SendInventoryPacket::NumLinks; ++i)
+				if (report.links[i] != sentInventoryLinks[i]) { linksSame = false; break; }
+			if (!linksSame || !(report.items == sentInventory)) {
+				minecraft->raknetInstance->send(report);
+				sentInventory = report.items;
+				for (int i = 0; i < SendInventoryPacket::NumLinks; ++i)
+					sentInventoryLinks[i] = report.links[i];
+			}
 		}
 	}
 /*
