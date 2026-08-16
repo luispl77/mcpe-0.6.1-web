@@ -219,8 +219,10 @@ void AccountScreen::render(int xm, int ym, float a)
 			drawCenteredString(minecraft->font, _error, width / 2, height - 48, 0xffff5555);
 		else
 			// Said here rather than nowhere: somebody looking at a login on a
-			// game that never had one deserves to know what it is for.
-			drawCenteredString(minecraft->font, "Only for your servers. The game works signed out.",
+			// game that never had one deserves to know what it is for. Joining
+			// asks because the server keys your position and items on the name
+			// you bring, and signed out everybody is the same Steve.
+			drawCenteredString(minecraft->font, "Your name on servers, and what makes them yours.",
 			                   width / 2, height - 48, 0xffa0a0a0);
 		return;
 	}

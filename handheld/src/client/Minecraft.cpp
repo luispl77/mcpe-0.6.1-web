@@ -1507,6 +1507,18 @@ void Minecraft::cancelLocateMultiplayer() {
 bool Minecraft::joinMultiplayer( const PingedCompatibleServer& server )
 {
 	if (isLookingForMultiplayer && netCallback) {
+		/* Join as who you signed in as.
+		 *
+		 * The name in the LoginPacket is the key everything server-side hangs
+		 * off -- chat, the player list, and the per-player save file -- and
+		 * the default is the same "Steve" for every anonymous tab, so two
+		 * strangers in one world were sharing a single position and
+		 * inventory. Only where an account exists; everywhere else the old
+		 * name stands, which keeps LAN and local play exactly as they were. */
+		const std::string account = platform()->accountName();
+		if (!account.empty())
+			user->name = account;
+
 		isLookingForMultiplayer = false;
 		return raknetInstance->connect(server.address.ToString(false), server.address.GetPort());
 	}

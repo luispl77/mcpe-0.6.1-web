@@ -36,9 +36,15 @@ A name and a password and nothing else. No email, no recovery, no profile: this
 is a login for the server list on a Minecraft build from 2013, and every field
 that is not here is a field that cannot leak.
 
-It is **only** the server list. Single player, joining a world and hosting your
-own tab all work signed out and are never asked about — the one thing worth
-protecting is a world on somebody else's box that outlives the tab that made it.
+It is **only** the server list. Single player and hosting your own tab work
+signed out and are never asked about. **Joining a multiplayer world asks**
+(since 2026-08-16): the game routes a signed-out Join to the sign-in screen,
+and the join then carries the account name — which matters because the server
+keys everything on the player's name, most recently the per-player save file,
+and signed out every tab is the same "steve" sharing one position and one
+inventory. That gate lives in the game, not here: the relay still switches
+datagrams for whoever has a route, and a rebuilt client could still claim any
+name it likes. The threat model is friends on phones, same as the rest of this.
 
 Passwords are **scrypt** with a per-account salt. Tokens are **signed, not
 stored**: `<user>.<expiry>.<hmac>`, where the HMAC covers the account's password

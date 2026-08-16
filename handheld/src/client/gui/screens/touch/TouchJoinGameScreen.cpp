@@ -216,6 +216,20 @@ void JoinGameScreen::buttonClicked(Button* button)
 	{
 		if (isIndexValid(gamesList->selectedItem))
 		{
+			/* No joining without a name of your own (2026-08-16).
+			 *
+			 * Signed out, every player is the same "Steve", and the server
+			 * keys everything by name -- most recently the per-player save
+			 * file, so strangers were sharing one position and one inventory.
+			 * The board stays browsable signed out; the way *in* is what asks.
+			 * Same screen New Server already sends you to, and it comes back
+			 * here once you are somebody. */
+			if (_hasAccounts && _accountName.empty())
+			{
+				minecraft->setScreen(new AccountScreen());
+				return;
+			}
+
 			PingedCompatibleServer selectedServer = gamesList->copiedServerList[gamesList->selectedItem];
 #if defined(MC_WASM)
 			/* Locked servers get asked first.
