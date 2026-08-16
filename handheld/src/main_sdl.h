@@ -29,6 +29,7 @@
 #include "platform/input/Mouse.h"
 #include "platform/input/Keyboard.h"
 #include "platform/input/Multitouch.h"
+#include "network/RakNetInstance.h"
 
 static SDL_Window* g_window = 0;
 static bool g_running = true;
@@ -118,6 +119,46 @@ extern "C" EMSCRIPTEN_KEEPALIVE void mcpe_pointerlock_lost()
 {
 	if (g_state.app && g_state.app->mouseGrabbed)
 		g_state.app->releaseMouse();
+}
+
+/** Runs the networking for one turn without drawing a frame.
+
+    The frame loop is requestAnimationFrame, and a browser all but stops handing
+    those to a tab nobody is looking at -- none at all in the background, a
+    couple a second for a window behind another. So runFrame() stops, and with
+    it the RunUpdateCycleOnce() inside runEvents() that is this build's entire
+    update thread. Nothing is then sent, acked or picked up off the relay, and
+    both ends drop each other on the RakNet timeout. Switching tabs killed the
+    game.
+
+    This is the same first half of Minecraft::update(), and nothing else. The
+    page calls it when it notices frames have stopped arriving, so the
+    connection keeps breathing, but the world is deliberately left frozen:
+    ticking a level at whatever rate a throttled background timer happens to
+    fire would be worse than not ticking it -- the simulation is written for a
+    steady 20Hz -- and a joined player would rather see the host's world paused
+    for a moment than be thrown out of it.
+
+    Safe to call at any point the page can reach: before startApp() there is no
+    app, and an unstarted peer returns immediately on its endThreads check. */
+extern "C" EMSCRIPTEN_KEEPALIVE void mcpe_pump_net()
+{
+	if (g_state.app && g_state.app->raknetInstance)
+		g_state.app->raknetInstance->runEvents(g_state.app->netCallback);
+}
+
+/** Called from the page as the tab is closing, to say so on the wire.
+
+    Nothing else does: the game's own disconnect runs on leaveGame, and a tab
+    that is simply closed never reaches it -- main() returned to the browser
+    long ago and there are no destructors coming. Without this the only thing
+    that ends the connection is the peer timeout, which is deliberately long
+    enough to survive a backgrounded tab, so a closed one would leave a player
+    standing in everyone else's world for the whole of it. */
+extern "C" EMSCRIPTEN_KEEPALIVE void mcpe_net_leave()
+{
+	if (g_state.app && g_state.app->raknetInstance)
+		g_state.app->raknetInstance->disconnect();
 }
 
 /** Called from the page whenever the canvas needs to be a different size --

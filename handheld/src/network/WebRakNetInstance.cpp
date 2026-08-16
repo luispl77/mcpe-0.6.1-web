@@ -207,7 +207,22 @@ WebRakNetInstance::WebRakNetInstance()
 	RakNet::SocketLayer::SetSocketLayerOverride(&g_transport);
 
 	_peer = RakNet::RakPeerInterface::GetInstance();
-	_peer->SetTimeoutTime(20000, RakNet::UNASSIGNED_SYSTEM_ADDRESS);
+
+	/* Six times the 20s a phone gets on a LAN, because a tab can go quiet in a
+	   way a phone on a LAN cannot. The page pumps the network while it is
+	   hidden (see mcpe_pump_net), but it can only pump as often as the browser
+	   will wake it: background timers are clamped to about one a second, and
+	   Chrome drops that to one a minute once a tab has been hidden for five.
+	   Two players who both switch away would then be talking once a minute
+	   each, and a 20s timeout ends that. A phone that locks its screen stops
+	   answering altogether until it is unlocked.
+
+	   The cost of a long timeout is how long an unannounced departure stands
+	   there, and departures are announced now: leaveGame flushes a disconnect,
+	   and so does the page on pagehide. What is left is a tab that crashed or
+	   a phone that died, and two minutes of ghost beats being thrown out of a
+	   world for looking something up. */
+	_peer->SetTimeoutTime(120000, RakNet::UNASSIGNED_SYSTEM_ADDRESS);
 	_peer->SetOccasionalPing(true);
 }
 
@@ -331,9 +346,11 @@ void WebRakNetInstance::disconnect()
 
 	   So the crank gets turned by hand: close each connection, run update cycles
 	   until the notifications are on the wire, then shut down with no block at
-	   all. Anyone who misses them still drops us on the 20s timeout set in the
+	   all. Anyone who misses them still drops us on the timeout set in the
 	   constructor, which is what used to happen to a phone leaving a LAN by
-	   walking out of range. */
+	   walking out of range -- but that is now two minutes, which is why the
+	   page calls this on pagehide as well rather than leaving a closed tab to
+	   be timed out. */
 	if (_peer && _peer->IsActive())
 	{
 		const unsigned short peers = _peer->GetMaximumNumberOfPeers();

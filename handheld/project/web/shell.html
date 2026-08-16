@@ -1023,15 +1023,72 @@
     var inbox = [];
     var retryAt = 0;
 
-    // A tab that is not draining its inbox is a tab that has stopped ticking the
-    // game, and by the time it starts again these are far too old to be worth
-    // delivering. Dropping the oldest is what a socket receive buffer does when
-    // it overflows, and RakNet already treats loss as ordinary.
+    // A tab that is not draining its inbox is a tab that has stopped running
+    // altogether -- a hidden one still pumps, see below -- and by the time it
+    // starts again these are far too old to be worth delivering. Dropping the
+    // oldest is what a socket receive buffer does when it overflows, and
+    // RakNet already treats loss as ordinary.
     var MAX_INBOX = 256;
 
     // Long enough not to hammer a service that is down, short enough that a
-    // player who blinked out gets back before their peers time them out at 20s.
+    // player who blinked out gets back before their peers time them out.
     var RETRY_MS = 3000;
+
+    // ---- Keeping the wire alive when the frame loop is not running ----------
+    //
+    // The game -- networking included -- is driven by requestAnimationFrame,
+    // and a browser stops handing those out to a tab nobody is looking at. So
+    // runFrame() stops, and with it the RunUpdateCycleOnce() that is this
+    // build's whole update thread: nothing is sent or acked, this inbox fills
+    // and is never drained, and the two ends drop each other on the RakNet
+    // timeout. Switching tabs ended the game.
+    //
+    // mcpe_pump_net() is the network half of a frame with no drawing in it,
+    // and what decides to call it is whether frames are actually arriving --
+    // not document.hidden. Those are not the same question: an occluded or
+    // unfocused window is throttled to a few frames a second while still
+    // reporting itself visible, and a tab really in the background gets none
+    // at all while reporting the same thing on some platforms. Asking the
+    // frame loop directly covers every one of those without naming any of
+    // them, and stops on its own the moment frames come back.
+    //
+    // Two things drive the check, because neither is enough alone:
+    //
+    //  - every datagram that arrives, since a WebSocket message is delivered
+    //    to a backgrounded tab whatever its timers are doing. This is what
+    //    keeps a hidden player answering a peer who is still playing.
+    //  - a 1s interval, so we originate traffic rather than only replying.
+    //    Background timers are clamped to about one a second, and Chrome cuts
+    //    that to one a minute after five minutes hidden -- survivable only
+    //    because each side's send wakes the other's onmessage.
+    //
+    // MIN_PUMP_MS is not throttling for its own sake: RunUpdateCycleOnce()
+    // works out what to send from how long it has been since the last one, so
+    // a burst of arrivals pumped back to back is one frame counted many times
+    // and the sends never go. Anything skipped stays in the inbox, and the
+    // next pump drains all of it -- the receive path is a loop, not one-shot.
+    var STALL_MS = 250;
+    var MIN_PUMP_MS = 20;
+    var lastPumpAt = 0;
+    var lastFrameAt = Date.now();
+
+    // Rides along with the module's own frame callback -- same vsync, same
+    // throttling -- and does nothing but say when it last ran.
+    (function frameProbe() {
+      lastFrameAt = Date.now();
+      requestAnimationFrame(frameProbe);
+    })();
+
+    function pumpIfFrameLoopStalled() {
+      if (!window.mcpeReady || !window.Module || !Module._mcpe_pump_net) return;
+
+      var now = Date.now();
+      if (now - lastFrameAt < STALL_MS) return;   // frames are doing this for us
+      if (now - lastPumpAt < MIN_PUMP_MS) return;
+      lastPumpAt = now;
+
+      Module._mcpe_pump_net();
+    }
 
     function connect() {
       if (!url || sock) return;
@@ -1066,6 +1123,7 @@
         }
         if (inbox.length >= MAX_INBOX) inbox.shift();
         inbox.push(new Uint8Array(e.data));
+        pumpIfFrameLoopStalled();
       };
 
       // Both paths land here. Clearing the route matters: it is what stops the
@@ -1136,6 +1194,20 @@
     // has to bring it back. Cheap: it returns immediately unless there is no
     // socket and the backoff has expired.
     setInterval(connect, 1000);
+
+    // The half of the background pump that does not wait to be spoken to. Also
+    // returns immediately while frames are flowing, where runFrame has it.
+    setInterval(pumpIfFrameLoopStalled, 1000);
+
+    // Last word on the way out. The peer timeout is long enough to ride out a
+    // throttled background tab (see WebRakNetInstance), which would otherwise
+    // mean a closed tab standing in everyone's world for two minutes. This is
+    // the same flush leaveGame does, spent on the way to the door: best-effort,
+    // like every other unload handler, but it usually lands.
+    window.addEventListener('pagehide', function () {
+      if (window.mcpeReady && window.Module && Module._mcpe_net_leave)
+        Module._mcpe_net_leave();
+    });
 
     /* Says which of the two deployments this is, because otherwise the only way
      * to find out is to open Join Game and see whether anybody is there.

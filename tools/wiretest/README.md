@@ -63,6 +63,36 @@ Covers the half that only exists in a browser: that the page boots, that
 other, and that the deployment either says multiplayer is on or links to the one
 where it is.
 
+## `background.mjs` — does the game keep talking when you look away?
+
+Same wants as `browser.mjs`, plus a display: it needs a **headed** browser, so
+`xvfb-run -a` on a box without one. Two Playwright pages are two windows, and an
+unfocused window is only throttled — B is opened by A with `window.open` so they
+are tabs of one window and switching really backgrounds the other.
+
+```sh
+node tools/lobby/server.js &
+(cd handheld/project/web/build && python3 -m http.server 8000) &
+npm i playwright-core && xvfb-run -a node tools/wiretest/background.mjs
+```
+
+The frame loop is `requestAnimationFrame` and the network rides on it, so a tab
+in the background stops sending, stops acking and stops draining the relay until
+both ends time each other out. This checks that `mcpe_pump_net()` takes over:
+that frames collapse, that the pump runs anyway, that an arriving datagram wakes
+the tab inside 250ms rather than waiting on the 1s timer, and that the pump
+stands down again when frames come back.
+
+It is also where the gate got chosen. `document.hidden` is the obvious signal
+and the wrong one: under Xvfb it stays `false` while frames are being throttled
+from 25fps to 2, and it would be false in the same way for an occluded or
+unfocused window. The test prints it beside the frame counts for that reason.
+The pump asks the frame loop whether it is running instead.
+
+It drives `window.mcpeNet` directly and never starts a world, so no peer has
+been through `Startup()` and the pump has no RakNet to turn — `raknet.cpp` is
+what covers the far side of that call.
+
 ## What none of them cover
 
 Driving the game itself — Start Game, Create new, pick a mode, Join Game, click
