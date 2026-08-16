@@ -21,86 +21,39 @@ node tools/servers/manager.js
 |---|---|
 | `GET /` | what this is, how many worlds are up |
 | `GET /list` | `{servers: [{id, name, world, mode, locked, upSeconds, idleSeconds}]}` |
-| `POST /register` | `{user, pass}` → `{user, token}` — makes an account |
-| `POST /login` | `{user, pass}` → `{user, token}` |
-| `POST /whoami` | `{token}` → `{user, servers: [id], max}` — still signed in, and what it owns |
-| `POST /create` | `{name, mode?, seed?, password?, token?}` → `{id, name, locked, owner, ownerAccount}` |
-| `POST /configure` | `{id, token\|owner\|key, name?, password?}` — rename, set or clear the password |
-| `POST /delete` | `{id, token\|owner\|key}` — stops it and moves its directory aside |
+| `POST /create` | `{name, mode?, seed?, password?}` → `{id, name, locked, owner}` |
+| `POST /configure` | `{id, owner\|key, name?, password?}` — rename, set or clear the password |
+| `POST /delete` | `{id, owner\|key}` — stops it and moves its directory aside |
 | `POST /seen` | `{id}` — says somebody is playing; also wakes a sleeping world |
 | `POST /stop` | `{id, key}` — operator only; puts it to sleep, the next join wakes it |
 
-## Accounts
-
-A name and a password and nothing else. No email, no recovery, no profile: this
-is a login for the server list on a Minecraft build from 2013, and every field
-that is not here is a field that cannot leak.
-
-It is **only** the server list. Single player and hosting your own tab work
-signed out and are never asked about. **Joining a multiplayer world asks**
-(since 2026-08-16): the game routes a signed-out Join to the sign-in screen,
-and the join then carries the account name — which matters because the server
-keys everything on the player's name, most recently the per-player save file,
-and signed out every tab is the same "steve" sharing one position and one
-inventory. That gate lives in the game, not here: the relay still switches
-datagrams for whoever has a route, and a rebuilt client could still claim any
-name it likes. The threat model is friends on phones, same as the rest of this.
-
-Passwords are **scrypt** with a per-account salt. Tokens are **signed, not
-stored**: `<user>.<expiry>.<hmac>`, where the HMAC covers the account's password
-hash as well, so a restart of this process does not sign everybody out and a
-password change invalidates every token ever issued. The cost of that trade is
-that there is no server-side logout — signing out drops the token in the
-browser, and on a shared machine the real answer is to change the password.
-
-State lives in `MCPE_ACCOUNTS_FILE` (default `$MCPE_SERVERS_ROOT/accounts.json`),
-written `0600`. It holds the token-signing secret, so **it is the one file here
-worth protecting**: with it you can mint a token for any account.
-
-| Knob | Default | |
-|---|---|---|
-| `MCPE_MAX_ACCOUNTS` | 200 | |
-| `MCPE_WORLDS_PER_ACCOUNT` | 3 | how many worlds one account may have up |
-| `MCPE_LOGIN_PER_HOUR` | 30 | per source, a brake and not a boundary |
-| `MCPE_REGISTER_PER_HOUR` | 5 | |
-
-`/login` says "wrong name or password" whether the name exists or not. `/register`
-is specific ("that name is taken", "password: at least 6 characters"), because
-those are rules about what you typed rather than hints about who else exists —
-and the game shows that sentence verbatim, so it has to be worth reading.
-
 ## Who may change a world
 
-A world is owned **one way or the other and never both**:
+Nobody here is asked who they are. There is no login and no player identity of
+any kind — a world is owned **by a browser**, which is the most that can be
+checked without one:
 
-- **By an account**, when `/create` was given a token. Nothing is handed back;
-  ownership is a row in `accounts.json` and follows the person to any device
-  they sign in on.
-- **By a browser**, when it was not. `/create` mints an **owner secret**, hands
-  it back exactly once, and keeps only its SHA-256; the page stores it in
-  `localStorage`. This is what ownership was before accounts, and it stays
-  because every world made before today is owned this way and none of them
-  should stop working.
+- `/create` mints an **owner secret**, hands it back exactly once, and keeps
+  only its SHA-256, so this file being readable does not hand anybody else the
+  world. The page stores the secret in `localStorage` and sends it with
+  `/configure` and `/delete`.
+- The **operator key** works on any world, and is the way in when the secret is
+  gone.
 
-The operator key works on both. The game asks `canManageServer()` before it
-draws Settings and Delete at all, so a world somebody else made has no button
-rather than a button that answers 403.
-
-The game requires a sign-in before **New Server**, which this service does not:
-it still makes worlds for anyone who asks. That is deliberate — the rule is
-about what is worth offering, not about what is permitted, and enforcing it here
-would be the thing that broke the worlds that already exist.
+Ownership is therefore a browser and not a person, which is worth saying
+plainly: a world made on the laptop is not yours on the phone. The game asks
+`canManageServer()` before it draws Settings and Delete at all, so a world
+somebody else made has no button rather than a button that answers 403.
 
 Two consequences worth knowing:
 
-- **A world made before accounts has no owner and can only be reached with the
-  operator key.** A visitor cannot adopt one, deliberately — a route that handed
-  out an unowned world would hand it to whoever asked first. An *operator* can,
-  by passing `ownerAccount` to `/configure` along with the key, which is a person
-  deciding rather than a race.
-- **Clearing the browser's storage loses a world made signed out.** It keeps
-  running and stays joinable; nobody can rename or delete it but an operator.
-  This is the whole reason accounts exist.
+- **Clearing the browser's storage loses the world.** It keeps running and stays
+  joinable — losing the secret costs the buttons, never the world — but nobody
+  can rename or delete it after that except an operator.
+- **A visitor cannot adopt an unowned world**, deliberately: a route that handed
+  one out would hand it to whoever asked first, and the prize is somebody else's
+  evening. A world made before owners existed has no hash and answers only to
+  the operator key.
 
 `/delete` **archives rather than removes**: the world is stopped and its
 directory renamed to `.deleted-<id>-<stamp>`, still under `MCPE_SERVERS_ROOT`.

@@ -71,7 +71,6 @@ private:
 	TButton bDelete;
 	TButton bBack;
 	TButton bCreate;
-	TButton bAccount;
 	THeader bHeader;
 	AvailableGamesList* gamesList;
 
@@ -85,12 +84,6 @@ private:
 	 * answer only moves when the selection does. */
 	bool _canManage;
 	int _managedItem;
-
-	/* The account, read once in init(). ScreenChooser builds a new screen
-	 * every time this one is returned to, so signing in or out comes back to a
-	 * screen that has already asked again -- there is nothing to poll for. */
-	bool _hasAccounts;
-	std::string _accountName;
 };
 
 };

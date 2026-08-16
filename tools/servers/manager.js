@@ -70,37 +70,6 @@ const OPERATOR_KEY = process.env.MCPE_OPERATOR_KEY || '';
  * an IP and a phone network is one IP -- just a brake. */
 const CREATE_PER_HOUR = Number(process.env.MCPE_CREATE_PER_HOUR || 6);
 
-/* Accounts.
- *
- * Until now a world was owned by a *browser*: /create handed back a secret and
- * whichever localStorage held it could delete the world. That is the most that
- * can be checked without accounts, and it is not much -- clear your site data
- * and your worlds are nobody's, open the page on your phone and they are not
- * yours there either.
- *
- * An account is a name and a password and nothing else. No email, no recovery,
- * no profile: this is a login for the server list on a Minecraft build from
- * 2013, and every field that is not here is a field that cannot leak. It buys
- * exactly three things -- ownership that follows you between devices, a name
- * other players see, and a cap so one person cannot fill the box.
- *
- * Deliberately not a login for the *game*. Single player, joining, and hosting
- * your own tab all work signed out, exactly as they did.
- */
-const ACCOUNTS_FILE = process.env.MCPE_ACCOUNTS_FILE || path.join(ROOT || '.', 'accounts.json');
-const MAX_ACCOUNTS  = Number(process.env.MCPE_MAX_ACCOUNTS || 200);
-
-/** How many worlds one account may have up at once. */
-const WORLDS_PER_ACCOUNT = Number(process.env.MCPE_WORLDS_PER_ACCOUNT || 3);
-
-/* Guessing a password should cost something. Per source and generous, because
- * a source is an IP and a phone network is one IP -- the same caveat as
- * CREATE_PER_HOUR, and the same modest goal: a brake, not a boundary. */
-const LOGIN_PER_HOUR    = Number(process.env.MCPE_LOGIN_PER_HOUR || 30);
-const REGISTER_PER_HOUR = Number(process.env.MCPE_REGISTER_PER_HOUR || 5);
-
-const TOKEN_MS = 30 * 24 * 3600 * 1000;
-
 /** How much one world may say per second before it is quietened. */
 const LOG_LINES_PER_SEC = Number(process.env.MCPE_LOG_LINES_PER_SEC || 20);
 
@@ -117,110 +86,6 @@ fs.mkdirSync(ROOT, { recursive: true });
 /** id -> {id, name, world, port, salt, passwordHash, child, startedAt, seenAt} */
 const running = new Map();
 const creates = new Map();   // source -> [timestamps]
-const logins  = new Map();   // source -> [timestamps]
-const signups = new Map();   // source -> [timestamps]
-
-/* ---------------------------------------------------------------------------
- * Accounts
- * ------------------------------------------------------------------------- */
-
-/** user -> {user, salt, hash, madeAt}. `hash` is scrypt, never the password. */
-const accounts = new Map();
-
-/** Signs tokens. Persisted, so a restart does not sign everybody out. */
-let tokenSecret = '';
-
-function loadAccounts() {
-	let blob;
-	try {
-		blob = JSON.parse(fs.readFileSync(ACCOUNTS_FILE, 'utf8'));
-	} catch (e) {
-		tokenSecret = crypto.randomBytes(32).toString('hex');
-		return;
-	}
-	tokenSecret = typeof blob.secret === 'string' && blob.secret.length >= 32
-		? blob.secret : crypto.randomBytes(32).toString('hex');
-	for (const a of (Array.isArray(blob.accounts) ? blob.accounts : []))
-		if (typeof a.user === 'string' && typeof a.salt === 'string' && typeof a.hash === 'string')
-			accounts.set(a.user, { user: a.user, salt: a.salt, hash: a.hash, madeAt: Number(a.madeAt) || 0 });
-	if (accounts.size) console.log('loaded %d account(s)', accounts.size);
-}
-
-function saveAccounts() {
-	const blob = { secret: tokenSecret, accounts: Array.from(accounts.values()) };
-	const tmp = ACCOUNTS_FILE + '.tmp';
-	// 0600 before anything is in it: this file is the only thing standing
-	// between a readable disk and everybody's worlds.
-	fs.writeFileSync(tmp, JSON.stringify(blob, null, 1), { mode: 0o600 });
-	fs.renameSync(tmp, ACCOUNTS_FILE);
-}
-
-/* A name is [a-z0-9_], because it is a key here, a directory-adjacent thing
- * nowhere, and something other players read everywhere. Lowercased so that
- * `Luis` and `luis` cannot be two people -- a list where two rows look the same
- * is a list where somebody joins the wrong one. */
-function cleanUser(value) {
-	if (typeof value !== 'string') return '';
-	const user = value.trim().toLowerCase();
-	return /^[a-z0-9_]{3,16}$/.test(user) ? user : '';
-}
-
-/** scrypt, not sha256: this one is worth being slow to check. */
-function hashPassword(password, salt, done) {
-	crypto.scrypt(password, salt, 32, (err, key) => done(err ? '' : key.toString('hex')));
-}
-
-/* A token is signed rather than stored.
- *
- * The alternative is a table of live sessions, which has to be persisted, swept
- * and capped, and buys one thing this does not have: server-side logout. That
- * is not worth a fourth piece of state here -- signing out drops the token in
- * the browser, and changing your password invalidates every token ever issued,
- * because the hash is part of what is signed. */
-function tokenFor(account) {
-	const expiry = Date.now() + TOKEN_MS;
-	const body = account.user + '.' + expiry;
-	return body + '.' + crypto.createHmac('sha256', tokenSecret)
-		.update(body + '.' + account.hash).digest('hex');
-}
-
-/** The account this token names, or null. */
-function accountFor(token) {
-	if (typeof token !== 'string') return null;
-	const parts = token.split('.');
-	if (parts.length !== 3) return null;
-
-	const account = accounts.get(parts[0]);
-	if (!account) return null;
-
-	const expiry = Number(parts[1]);
-	if (!(expiry > Date.now())) return null;
-
-	const body = parts[0] + '.' + parts[1];
-	const want = crypto.createHmac('sha256', tokenSecret)
-		.update(body + '.' + account.hash).digest('hex');
-	// Shape first: timingSafeEqual throws on a length mismatch.
-	if (!/^[0-9a-f]{64}$/.test(parts[2])) return null;
-	if (!crypto.timingSafeEqual(Buffer.from(parts[2], 'hex'), Buffer.from(want, 'hex'))) return null;
-
-	return account;
-}
-
-/** How many worlds this account has up. */
-function worldsOf(user) {
-	let n = 0;
-	for (const s of running.values()) if (s.ownerAccount === user) n++;
-	return n;
-}
-
-function rateLimited(table, source, perHour) {
-	const now = Date.now();
-	const recent = (table.get(source) || []).filter((t) => now - t < 3600000);
-	if (recent.length >= perHour) return true;
-	recent.push(now);
-	table.set(source, recent);
-	return false;
-}
 
 /* A name is shown to other players and used for nothing else. The id is what
  * becomes a directory, and it is derived here rather than taken: no dots, no
@@ -274,7 +139,7 @@ function publish() {
 			id: s.id, name: s.name, world: s.world, mode: s.mode, seed: s.seed,
 			host: '127.0.0.1', port: s.port, up: !!s.child,
 			salt: s.salt, passwordHash: s.passwordHash,
-			ownerHash: s.ownerHash, ownerAccount: s.ownerAccount
+			ownerHash: s.ownerHash
 		});
 
 	const tmp = SERVERS_FILE + '.tmp';
@@ -466,8 +331,7 @@ const server = http.createServer((req, res) => {
 		return send(res, 200, {
 			service: NAME, version: VERSION,
 			purpose: 'starts and stops dedicated worlds for the Minecraft PE 0.6.1 web build',
-			servers: running.size, max: MAX_SERVERS,
-			accounts: accounts.size
+			servers: running.size, max: MAX_SERVERS
 		});
 
 	if (route === '/list' && req.method === 'GET') {
@@ -481,88 +345,6 @@ const server = http.createServer((req, res) => {
 				idleSeconds: Math.round((now - s.seenAt) / 1000)
 			});
 		return send(res, 200, { servers: out });
-	}
-
-	/* ---------------------------------------------------------------------
-	 * Accounts
-	 *
-	 * Three routes and no more. Registering and signing in answer the same
-	 * shape, because the screen that calls them is one screen with two
-	 * buttons, and /whoami is what a browser holding a month-old token uses
-	 * to find out whether it is still anybody.
-	 *
-	 * Every failure below is the same sentence -- "that name and password do
-	 * not match" -- whether the name exists or not. A login that says which
-	 * half was wrong is a login that tells a stranger which names are real.
-	 * ------------------------------------------------------------------- */
-
-	if ((route === '/register' || route === '/login') && req.method === 'POST') {
-		return readBody(req, (body) => {
-			if (body === undefined) return send(res, 413, { error: 'body too large' });
-			if (!body) return send(res, 400, { error: 'bad json' });
-
-			const registering = route === '/register';
-			const source = sourceOf(req);
-			if (rateLimited(registering ? signups : logins, source,
-			                registering ? REGISTER_PER_HOUR : LOGIN_PER_HOUR))
-				return send(res, 429, { error: 'too many tries from here, wait a while' });
-
-			const user = cleanUser(body.user);
-			const pass = typeof body.pass === 'string' ? body.pass : '';
-
-			if (registering) {
-				// Said plainly, because these are rules about what you typed
-				// and not hints about who else exists.
-				if (!user) return send(res, 400, { error: 'name: 3-16 letters, numbers or _' });
-				if (pass.length < 6 || pass.length > 64)
-					return send(res, 400, { error: 'password: at least 6 characters' });
-				if (accounts.has(user)) return send(res, 409, { error: 'that name is taken' });
-				if (accounts.size >= MAX_ACCOUNTS) return send(res, 503, { error: 'no room for more accounts' });
-
-				const salt = crypto.randomBytes(16).toString('hex');
-				return hashPassword(pass, salt, (hash) => {
-					if (!hash) return send(res, 500, { error: 'could not make the account' });
-					const account = { user: user, salt: salt, hash: hash, madeAt: Date.now() };
-					accounts.set(user, account);
-					try { saveAccounts(); } catch (e) {
-						accounts.delete(user);
-						console.log('could not write accounts: %s', e.message);
-						return send(res, 500, { error: 'could not make the account' });
-					}
-					console.log('account %s created', user);
-					return send(res, 200, { ok: true, user: user, token: tokenFor(account) });
-				});
-			}
-
-			const account = user && accounts.get(user);
-			if (!account || !pass) return send(res, 403, { error: 'wrong name or password' });
-
-			return hashPassword(pass, account.salt, (hash) => {
-				if (!hash || hash.length !== account.hash.length ||
-				    !crypto.timingSafeEqual(Buffer.from(hash, 'hex'), Buffer.from(account.hash, 'hex')))
-					return send(res, 403, { error: 'wrong name or password' });
-				return send(res, 200, { ok: true, user: account.user, token: tokenFor(account) });
-			});
-		});
-	}
-
-	/* Is this token still anybody, and what does it own?
-	 *
-	 * Both in one answer because the page asks both at the same moment and for
-	 * the same reason: the game asks canManageServer() as the selection moves,
-	 * which has to be answered without a round trip, so the page keeps the list
-	 * and refreshes it rather than asking per row. */
-	if (route === '/whoami' && req.method === 'POST') {
-		return readBody(req, (body) => {
-			if (!body) return send(res, 400, { error: 'bad json' });
-			const account = accountFor(body.token);
-			if (!account) return send(res, 403, { error: 'not signed in' });
-
-			const mine = [];
-			for (const s of running.values())
-				if (s.ownerAccount === account.user) mine.push(s.id);
-			return send(res, 200, { ok: true, user: account.user, servers: mine, max: WORLDS_PER_ACCOUNT });
-		});
 	}
 
 	if (route === '/create' && req.method === 'POST') {
@@ -579,20 +361,6 @@ const server = http.createServer((req, res) => {
 			if (running.size >= MAX_SERVERS)
 				return send(res, 503, { error: 'no free slots' });
 
-			/* Signed in or not.
-			 *
-			 * Both are allowed, and which one you used decides who owns the
-			 * world: an account if there is one, otherwise the browser secret
-			 * this has always minted. Keeping the anonymous path is what lets
-			 * accounts be added without invalidating a single world that
-			 * already exists -- the check below simply grew a second way to
-			 * pass, and every old world still answers to its old key. */
-			const account = accountFor(body.token);
-			if (account && worldsOf(account.user) >= WORLDS_PER_ACCOUNT)
-				return send(res, 429, {
-					error: 'you already have ' + WORLDS_PER_ACCOUNT + ' servers up'
-				});
-
 			const name = cleanName(body.name) || 'World';
 			const id = idFor(name);
 			if (!id) return send(res, 503, { error: 'no free name' });
@@ -605,12 +373,8 @@ const server = http.createServer((req, res) => {
 
 			/* Who may delete or reconfigure this world. Handed back once, to the
 			 * page that asked for it, and kept here only as a hash -- so this
-			 * file being readable does not hand anybody else the world.
-			 *
-			 * Only minted for a world made signed out. With an account there is
-			 * already something durable to hang ownership on, and a second key
-			 * would only be a second way to lose it. */
-			const owner = account ? '' : crypto.randomBytes(16).toString('hex');
+			 * file being readable does not hand anybody else the world. */
+			const owner = crypto.randomBytes(16).toString('hex');
 			const entry = {
 				id: id, name: name, world: cleanName(body.world) || 'dedicated', port: port,
 				/* Fixed when the world is made and never after: the mode is
@@ -623,8 +387,7 @@ const server = http.createServer((req, res) => {
 				seed: String(body.seed || '').replace(/[^0-9-]/g, '').slice(0, 19),
 				salt: salt,
 				passwordHash: password ? crypto.createHash('sha256').update(salt + password).digest('hex') : '',
-				ownerHash: owner ? crypto.createHash('sha256').update(owner).digest('hex') : '',
-				ownerAccount: account ? account.user : ''
+				ownerHash: crypto.createHash('sha256').update(owner).digest('hex')
 			};
 
 			running.set(id, entry);
@@ -636,11 +399,11 @@ const server = http.createServer((req, res) => {
 			creates.set(source, recent);
 			publish();
 
-			// The only time the owner secret is ever sent anywhere. Absent when
-			// an account owns the world, which is the point of having one.
+			// The only time the owner secret is ever sent anywhere. If the page
+			// loses it the world is nobody's but an operator's, which is the
+			// honest limit of what can be checked without asking who anyone is.
 			return send(res, 200, {
-				id: id, name: name, locked: !!entry.passwordHash,
-				owner: owner, ownerAccount: entry.ownerAccount
+				id: id, name: name, locked: !!entry.passwordHash, owner: owner
 			});
 		});
 	}
@@ -671,15 +434,6 @@ const server = http.createServer((req, res) => {
 	 * delete button anybody could reach is a way to lose somebody's evening. */
 	function mayManage(entry, body) {
 		if (OPERATOR_KEY && String(body.key || '') === OPERATOR_KEY) return true;
-
-		/* A world is owned one way or the other and never both, so this is a
-		 * branch rather than two chances: an account-owned world has no owner
-		 * hash to fall back to, and letting it fall through would only mean
-		 * comparing a secret against an empty string. */
-		if (entry.ownerAccount) {
-			const account = accountFor(body.token);
-			return !!account && account.user === entry.ownerAccount;
-		}
 
 		const owner = String(body.owner || '');
 		if (!owner || !entry.ownerHash) return false;
@@ -736,23 +490,6 @@ const server = http.createServer((req, res) => {
 			if (typeof body.name === 'string' && cleanName(body.name))
 				entry.name = cleanName(body.name);
 
-			/* Handing a world to an account, which only an operator may do.
-			 *
-			 * There is deliberately no route by which a *visitor* claims an
-			 * unowned world -- that would be a race whose prize is somebody
-			 * else's evening, and every world made from now on has an owner
-			 * from the moment it exists. This exists for the handful made
-			 * before accounts did, and it is a person with the key deciding,
-			 * not the first browser to ask. */
-			if (OPERATOR_KEY && String(body.key || '') === OPERATOR_KEY &&
-			    typeof body.ownerAccount === 'string') {
-				const to = cleanUser(body.ownerAccount);
-				if (to && !accounts.has(to)) return send(res, 404, { error: 'no such account' });
-				entry.ownerAccount = to;
-				entry.ownerHash = '';   // one owner, one way
-				console.log('%s now belongs to %s', entry.id, to || '(nobody)');
-			}
-
 			if (typeof body.password === 'string') {
 				if (body.password) {
 					entry.salt = crypto.randomBytes(8).toString('hex');
@@ -765,10 +502,7 @@ const server = http.createServer((req, res) => {
 			}
 
 			publish();
-			return send(res, 200, {
-				ok: true, name: entry.name, locked: !!entry.passwordHash,
-				ownerAccount: entry.ownerAccount || ''
-			});
+			return send(res, 200, { ok: true, name: entry.name, locked: !!entry.passwordHash });
 		});
 	}
 
@@ -833,8 +567,7 @@ function restore() {
 			seed: String(entry.seed || '').replace(/[^0-9-]/g, '').slice(0, 19),
 			salt: typeof entry.salt === 'string' ? entry.salt : '',
 			passwordHash: typeof entry.passwordHash === 'string' ? entry.passwordHash : '',
-			ownerHash: typeof entry.ownerHash === 'string' ? entry.ownerHash : '',
-			ownerAccount: cleanUser(entry.ownerAccount)
+			ownerHash: typeof entry.ownerHash === 'string' ? entry.ownerHash : ''
 		};
 		running.set(id, restored);
 		try { start(restored); } catch (e) { running.delete(id); }
@@ -842,7 +575,6 @@ function restore() {
 	if (running.size) console.log('restored %d world(s)', running.size);
 }
 
-loadAccounts();
 restore();
 publish();
 server.listen(PORT, HOST, () => {
